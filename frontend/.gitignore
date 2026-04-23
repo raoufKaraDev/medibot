@@ -1,0 +1,23 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+# Dependencies
+frontend/node_modules/
+
+# Python cache
+backend/__pycache__/
+backend/routers/__pycache__/
+
+# Database
+backend/medibot.db
+
+# Build output
+frontend/dist/
+
+# Environment
+.env

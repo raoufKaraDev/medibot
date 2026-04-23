@@ -1,0 +1,1810 @@
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import {
+  LayoutDashboard, DoorOpen, Users, Pill, Bot, Activity,
+  AlertTriangle, RefreshCw, Package, X, Cpu, Wifi,
+  Plus, Trash2, Edit2, Save, Stethoscope, BadgeCheck, Search,
+  Bed, Sun, Moon, FlaskConical, Wrench, Camera, FileText,
+  BarChart3, Shield, ClipboardCheck, LogOut,
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import KioskView from './KioskView';
+import {
+  PharmacistValidationView,
+  DrugInteractionsAdminView,
+  AnalyticsDashboardView,
+  ShiftReportView,
+} from './adminExtras';
+import { DashboardView } from '@/features/admin/views/DashboardView';
+import { RoomsView } from '@/features/admin/views/RoomsView';
+import { EngineerView } from '@/features/admin/views/EngineerView';
+import { ThemeProvider, useTheme } from '@/shared/context/ThemeContext';
+import { PharmacyView } from './PharmacyView';
+
+// ── Types ──────────────────────────────────────────────────────────
+type AppMode   = 'kiosk' | 'admin';
+type AdminView =
+  | 'dashboard'
+  | 'rooms'
+  | 'patients'
+  | 'pharmacy'
+  | 'doctors'
+  | 'validation'
+  | 'interactions'
+  | 'analytics'
+  | 'shift'
+  | 'tech'
+  | 'engineer'
+  | 'settings'
+  | 'audit';
+
+interface Stats   { total_patients:number; alert_patients:number; total_doctors:number; dispenses_today:number; rooms_occupied:number; total_dispenses?:number }
+interface Room    { id:number; name:string; capacity:number; occupied:number; has_alert:boolean }
+interface PatientTreatment {
+  id: number;
+  patient_id: number;
+  med_name: string;
+  dose: string;
+  frequency: string;
+  route?: string;
+  start_date?: string;
+  end_date?: string;
+  origin?: string;
+  notes?: string;
+  active: number;
+}
+interface Patient {
+  id: number;
+  room_id: number;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  age: number;
+  weight: string;
+  blood_type: string;
+  diagnostic: string;
+  guardian?: { name: string; phone?: string; relationship?: string };
+  guardians?: Array<{ name: string; phone?: string; relationship?: string }>;
+  allergies: Array<string | { medication: string }>;
+  notes: string;
+  bed: number;
+  photo?: string;
+  date_naissance?: string;
+  groupe_sanguin?: string;
+  antecedents?: string;
+  traitement_en_cours?: string;
+  groupe_abo?: string;
+  rhesus?: string;
+  ph_C?: number;
+  ph_c?: number;
+  ph_E?: number;
+  ph_e?: number;
+  ph_K?: number;
+  ph_k?: number;
+  drug_allergies?: string[];
+  other_allergies?: string[];
+  blood_type_display?: string;
+  phenotype_display?: string;
+  current_treatments?: PatientTreatment[];
+}
+interface Med     { id:number; name:string; dosage:string; schedule:string; drawer:number; time:string }
+interface Doctor  { id:number; rfid_uid:string; name:string; role:string; created_at:string; username?:string }
+interface LogEntry{ id:number; med_name:string; drawer:number; mqtt_sent:number; timestamp:string; note?:string; dose_status?: string; prise_confirmed_at?: string | null; prise_confirmed_by?: string | null }
+interface TechStatus { mqtt_broker:string; mqtt_ws:string; esp32:string; stm32:string; last_activity:string|null; broker_host:string; broker_port:number; ws_port:number; robot_id:string; num_drawers:number }
+interface AuditEntry { id:number; actor:string; actor_role:string; action:string; target_type:string; target_id:number; detail:string; timestamp:string }
+
+// ── Role-based page access rules ───────────────────────────────────
+const PAGE_ACCESS: Record<string, string[]> = {
+  dashboard:    ['Médecin Chef Pédiatrie', 'Médecin', 'Pédiatre', 'Infirmiere'],
+  rooms:        ['Médecin Chef Pédiatrie', 'Médecin', 'Pédiatre', 'Infirmiere'],
+  patients:     ['Médecin Chef Pédiatrie', 'Médecin', 'Pédiatre', 'Infirmiere'],
+  pharmacy:     ['Médecin Chef Pédiatrie', 'Médecin', 'Pédiatre'],
+  doctors:      ['Médecin Chef Pédiatrie'],
+  validation:   ['Médecin Chef Pédiatrie', 'Médecin', 'Pédiatre'],
+  interactions: ['Médecin Chef Pédiatrie', 'Médecin'],
+  analytics:    ['Médecin Chef Pédiatrie', 'Médecin'],
+  shift:        ['Médecin Chef Pédiatrie', 'Médecin', 'Pédiatre', 'Infirmiere'],
+  engineer:     ['Médecin Chef Pédiatrie'],
+  audit:        ['Médecin Chef Pédiatrie'],
+};
+
+// ── API ────────────────────────────────────────────────────────────
+const api = async (path: string, opts?: RequestInit) => {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+};
+
+// ══════════════════════════════════════════════════════════════════
+// LOGIN VIEW
+// ══════════════════════════════════════════════════════════════════
+const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor) => void }) => {
+  const { dark } = useTheme();
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const result = await api('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+      onLoginSuccess(result);
+    } catch (err: any) {
+      setError('Identifiants incorrects');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inp = `w-full border rounded-xl px-4 py-3 text-sm outline-none focus:ring-2 transition-all ${
+    dark
+      ? 'bg-gray-800 border-gray-600 text-white focus:border-teal-400 focus:ring-teal-900 placeholder-gray-500'
+      : 'bg-white border-gray-200 text-gray-900 focus:border-teal-400 focus:ring-teal-100'
+  }`;
+
+  return (
+    <div className={`h-screen flex items-center justify-center ${dark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className={`w-full max-w-md rounded-2xl border shadow-xl p-8 ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+      >
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-teal-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+            <Bot className="w-8 h-8 text-white" />
+          </div>
+          <h1 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>MediBot</h1>
+          <p className="text-teal-500 text-sm font-semibold mt-1">Administration</p>
+          <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Hôpital de Rouiba — Service Pédiatrie</p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className={`block text-sm font-bold mb-1.5 ${dark ? 'text-gray-300' : 'text-gray-700'}`}>
+              Nom d'utilisateur
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Ex: kara"
+              className={inp}
+              disabled={loading}
+            />
+          </div>
+
+          <div>
+            <label className={`block text-sm font-bold mb-1.5 ${dark ? 'text-gray-300' : 'text-gray-700'}`}>
+              Mot de passe
+            </label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className={inp}
+              disabled={loading}
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700 font-semibold">
+              {error}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading || !username || !password}
+            className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm transition-colors"
+          >
+            {loading ? '…' : 'Se connecter'}
+          </button>
+        </form>
+
+
+      </motion.div>
+    </div>
+  );
+};
+
+// ── Theme-aware class helper ───────────────────────────────────────
+// Returns the right tailwind classes based on dark mode
+const tc = (light: string, dark: string, isDark: boolean) => isDark ? dark : light;
+
+// ── UI Atoms ───────────────────────────────────────────────────────
+const Badge = ({ text, color='gray' }: { text:string; color?:string }) => {
+  const map: Record<string,string> = {
+    red:'bg-red-100 text-red-700 border-red-200',
+    green:'bg-emerald-100 text-emerald-700 border-emerald-200',
+    blue:'bg-blue-100 text-blue-700 border-blue-200',
+    gray:'bg-gray-100 text-gray-600 border-gray-200',
+    teal:'bg-teal-100 text-teal-700 border-teal-200',
+    amber:'bg-amber-100 text-amber-700 border-amber-200',
+  };
+  return <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${map[color]||map.gray}`}>{text}</span>;
+};
+
+const Spinner = () => (
+  <div className="flex items-center justify-center py-16">
+    <div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+);
+
+interface ModalProps { title:string; onClose:()=>void; children:React.ReactNode; width?:string }
+const Modal = ({ title, onClose, children, width='max-w-lg' }: ModalProps) => {
+  const { dark } = useTheme();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <motion.div initial={{opacity:0,scale:.95}} animate={{opacity:1,scale:1}} exit={{opacity:0,scale:.95}}
+        className={`rounded-2xl shadow-2xl w-full ${width} max-h-[90vh] overflow-y-auto ${dark ? 'bg-gray-900 border border-gray-700' : 'bg-white'}`}>
+        <div className={`flex items-center justify-between px-6 py-4 border-b ${dark ? 'border-gray-700' : 'border-gray-100'}`}>
+          <h3 className={`font-black text-lg ${dark ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
+          <button onClick={onClose} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${dark ? 'bg-gray-800 hover:bg-gray-700 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 text-gray-500'}`}>
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="p-6">{children}</div>
+      </motion.div>
+    </div>
+  );
+};
+
+interface FieldProps { label:string; required?:boolean; children:React.ReactNode }
+const Field = ({ label, required, children }: FieldProps) => {
+  const { dark } = useTheme();
+  return (
+    <div>
+      <label className={`block text-sm font-bold mb-1.5 ${dark ? 'text-gray-300' : 'text-gray-700'}`}>
+        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
+      {children}
+    </div>
+  );
+};
+
+const useInpClass = () => {
+  const { dark } = useTheme();
+  return `w-full border rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 transition-all ${
+    dark
+      ? 'bg-gray-800 border-gray-600 text-white focus:border-teal-400 focus:ring-teal-900 placeholder-gray-500'
+      : 'bg-white border-gray-200 text-gray-900 focus:border-teal-400 focus:ring-teal-100'
+  }`;
+};
+
+// ── Theme Toggle ───────────────────────────────────────────────────
+const ThemeToggle = () => {
+  const { dark, toggle } = useTheme();
+  return (
+    <button onClick={toggle} title={dark ? 'Mode clair' : 'Mode sombre'}
+      className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all border ${
+        dark ? 'bg-gray-800 border-gray-700 text-yellow-400 hover:bg-gray-700' : 'bg-gray-100 border-gray-200 text-gray-600 hover:bg-gray-200'
+      }`}>
+      {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+    </button>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// SYSTEM STATUS DOT (doctor-friendly — no MQTT/ESP32 jargon)
+// ══════════════════════════════════════════════════════════════════
+const SystemStatusPill = ({ techStatus }: { techStatus: TechStatus | null }) => {
+  const ok = techStatus?.mqtt_broker === 'online';
+  const partial = !ok && techStatus !== null;
+  return (
+    <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold ${
+      ok      ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+      : partial ? 'bg-amber-50 border-amber-200 text-amber-700'
+      : 'bg-gray-50 border-gray-200 text-gray-400'
+    }`}>
+      <span className={`w-2 h-2 rounded-full ${ok ? 'bg-emerald-500 animate-pulse' : partial ? 'bg-amber-500' : 'bg-gray-300'}`} />
+      {ok ? 'Robot opérationnel' : partial ? 'Vérification...' : 'Hors ligne'}
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// PATIENT PHOTO UPLOAD — supports camera capture + gallery toggle
+// ══════════════════════════════════════════════════════════════════
+const PhotoUpload = ({ patientId, current, onUpdated }: { patientId:number; current:string; onUpdated:(b64:string)=>void }) => {
+  const { dark } = useTheme();
+  const [uploading, setUploading] = useState(false);
+  const [preview, setPreview] = useState<string>(current || '');
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { setPreview(current || ''); }, [current]);
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const b64 = reader.result as string;
+      setPreview(b64);
+      setUploading(true);
+      try {
+        await api(`/api/patients/${patientId}/photo`, { method:'POST', body:JSON.stringify({photo:b64}) });
+        onUpdated(b64);
+      } finally { setUploading(false); }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const btnCls = `flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border font-semibold transition-all ${
+    dark
+      ? 'border-gray-600 text-gray-400 hover:text-teal-400 hover:border-teal-600 bg-gray-800'
+      : 'border-gray-200 text-gray-500 hover:text-teal-600 hover:border-teal-400 bg-white'
+  }`;
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="relative w-24 h-24">
+        {preview ? (
+          <img src={preview} alt="patient" className="w-24 h-24 rounded-2xl object-cover border-2 border-white shadow-md"/>
+        ) : (
+          <div className={`w-24 h-24 rounded-2xl flex flex-col items-center justify-center border-2 border-dashed ${dark?'border-gray-600 bg-gray-700/50 text-gray-500':'border-gray-300 bg-gray-50 text-gray-400'}`}>
+            <Camera className="w-6 h-6 mb-1"/>
+            <span className="text-xs font-bold">Photo</span>
+          </div>
+        )}
+        {uploading && (
+          <div className="absolute inset-0 rounded-2xl bg-black/60 flex items-center justify-center">
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"/>
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-1.5">
+        <button type="button" onClick={() => cameraRef.current?.click()} disabled={uploading} className={btnCls}>
+          <Camera className="w-3 h-3"/> Caméra
+        </button>
+        <button type="button" onClick={() => galleryRef.current?.click()} disabled={uploading} className={btnCls}>
+          🖼️ Galerie
+        </button>
+      </div>
+
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFile} disabled={uploading}/>
+      <input ref={galleryRef} type="file" accept="image/*" className="hidden" onChange={handleFile} disabled={uploading}/>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// ORDONNANCE (Prescription form)
+// ══════════════════════════════════════════════════════════════════
+const OrdonnancePanel = ({ patient }: { patient:Patient }) => {
+  const { dark } = useTheme();
+  const inp = useInpClass();
+  const [meds, setMeds] = useState<Med[]>([]);
+  const [allMeds, setAllMeds] = useState<Med[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [selMed, setSelMed] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [doctors, setDoctors] = useState<Array<{ rfid_uid: string; name: string; role_code?: string }>>([]);
+  const [presRfid, setPresRfid] = useState('');
+
+  const load = useCallback(async()=>{
+    const [pm,am] = await Promise.all([api(`/api/patients/${patient.id}/medications`), api('/api/medications')]);
+    setMeds(pm); setAllMeds(am);
+  },[patient.id]);
+  useEffect(()=>{load();},[load]);
+
+  useEffect(() => {
+    api('/api/doctors')
+      .then((rows: Array<{ rfid_uid: string; name: string; role_code?: string }>) => {
+        setDoctors(rows);
+        const ok = rows.find((d) => d.role_code !== 'interne');
+        if (ok) setPresRfid(ok.rfid_uid);
+      })
+      .catch(() => {});
+  }, []);
+
+  const addMed = async()=>{
+    if(!selMed) return; setBusy(true);
+    try { await api(`/api/patients/${patient.id}/medications`,{method:'POST',body:JSON.stringify({medication_id:parseInt(selMed)})}); setSelMed(''); setAdding(false); await load(); }
+    finally { setBusy(false); }
+  };
+  const removeMed = async(id:number)=>{
+    if(!confirm('Retirer ce médicament ?')) return;
+    await api(`/api/patients/${patient.id}/medications/${id}`,{method:'DELETE'}); await load();
+  };
+
+  const available = allMeds.filter(m=>!meds.find(p=>p.id===m.id));
+  const today = new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'long',year:'numeric'});
+  const card = dark?'bg-gray-800 border-gray-700':'bg-white border-gray-200';
+  const pres = doctors.find((d) => d.rfid_uid === presRfid);
+  const interneBlocked = pres?.role_code === 'interne';
+
+  return (
+    <div className="space-y-4">
+      {/* Ordonnance header */}
+      <div className={`border-2 border-teal-200 rounded-2xl p-5 ${dark?'bg-teal-900/20':'bg-teal-50'}`}>
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-teal-700 font-black text-lg">ORDONNANCE MÉDICALE</p>
+            <p className={`text-sm mt-0.5 ${dark?'text-gray-300':'text-gray-600'}`}>Hôpital de Rouiba — Service Pédiatrie</p>
+            <p className={`text-sm ${dark?'text-gray-400':'text-gray-500'}`}>Le {today}</p>
+          </div>
+          <div className="text-right">
+            <p className={`font-black ${dark?'text-white':'text-gray-900'}`}>{patient.full_name}</p>
+            <p className={`text-sm ${dark?'text-gray-400':'text-gray-500'}`}>{patient.age} ans · {patient.weight} · {patient.blood_type_display || patient.groupe_sanguin || patient.blood_type}</p>
+            <p className={`text-sm ${dark?'text-gray-400':'text-gray-500'}`}>{patient.diagnostic}</p>
+            {patient.date_naissance && <p className={`text-xs ${dark?'text-gray-500':'text-gray-400'}`}>Né(e) le {patient.date_naissance}</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* Allergy warning */}
+      {((patient.allergies?.length ?? 0) > 0 || (patient.drug_allergies?.length ?? 0) > 0) && (
+        <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl p-3">
+          <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0"/>
+          <span className="font-black text-red-700 text-sm">⚠️ ALLERGIES : </span>
+          <div className="flex flex-wrap gap-1">
+            {[...new Set([...(patient.drug_allergies ?? []), ...(patient.allergies ?? []).map((a) => (typeof a === 'string' ? a : a.medication))])].filter(Boolean).map((t) => (
+              <Badge key={t} text={t} color="red"/>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Medications list */}
+      <div className={`${card} border rounded-2xl p-5`}>
+        <div className="mb-4">
+          <label className={`block text-xs font-bold mb-1 ${dark?'text-gray-400':'text-gray-600'}`}>Prescripteur (badge RFID)</label>
+          <select value={presRfid} onChange={(e) => setPresRfid(e.target.value)} className={`${inp} max-w-md`}>
+            {doctors.map((d) => (
+              <option key={d.rfid_uid} value={d.rfid_uid}>
+                {d.name} {d.role_code === 'interne' ? '(interne)' : ''}
+              </option>
+            ))}
+          </select>
+          {interneBlocked && (
+            <p className="text-sm text-red-600 font-bold mt-2">Les internes ne peuvent pas créer ou modifier d&apos;ordonnance.</p>
+          )}
+        </div>
+        <div className="flex items-center justify-between mb-4">
+          <p className={`font-black ${dark?'text-white':'text-gray-800'}`}>💊 Médicaments prescrits</p>
+          <button type="button" onClick={() => !interneBlocked && setAdding(!adding)} disabled={interneBlocked}
+            className={`flex items-center gap-1.5 text-sm font-bold border px-3 py-1.5 rounded-xl transition-all ${
+              interneBlocked
+                ? 'text-gray-400 border-gray-200 cursor-not-allowed'
+                : 'text-teal-600 hover:text-teal-700 border-teal-200 hover:border-teal-400'
+            }`}>
+            <Plus className="w-3.5 h-3.5"/> Nouvelle prescription
+          </button>
+        </div>
+        <AnimatePresence>
+          {adding&&(
+            <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} exit={{opacity:0,height:0}} className={`flex gap-2 mb-3 overflow-hidden`}>
+              <select value={selMed} onChange={e=>setSelMed(e.target.value)} className={`flex-1 ${inp}`}>
+                <option value="">— Sélectionner un médicament —</option>
+                {available.map(m=><option key={m.id} value={m.id}>{m.name} {m.dosage} — Tiroir {m.drawer}</option>)}
+              </select>
+              <button onClick={addMed} disabled={!selMed||busy}
+                className="px-4 py-2 bg-teal-600 text-white rounded-xl text-sm font-bold hover:bg-teal-700 disabled:bg-gray-300 transition-colors">
+                {busy?'...':'✓'}
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {meds.length===0?(
+          <p className={`text-sm text-center py-6 ${dark?'text-gray-500':'text-gray-400'}`}>Aucun médicament prescrit</p>
+        ):(
+          <div className="space-y-2">
+            {meds.map((m,i)=>(
+              <div key={m.id} className={`flex items-center gap-4 rounded-xl p-3 border ${dark?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-100'}`}>
+                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${dark?'bg-teal-800 text-teal-200':'bg-teal-100 text-teal-700'}`}>{i+1}</span>
+                <div className="flex-1">
+                  <p className={`font-black ${dark?'text-white':'text-gray-900'}`}>{m.name}</p>
+                  <p className={`text-sm ${dark?'text-gray-400':'text-gray-500'}`}>
+                    {m.dosage} · {m.schedule} · {m.time} · <span className="font-mono">Tiroir [{m.drawer}]</span>
+                  </p>
+                </div>
+                <button onClick={()=>removeMed(m.id)} className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${dark?'hover:bg-red-900/50 text-gray-500 hover:text-red-400':'hover:bg-red-100 text-gray-400 hover:text-red-500'}`}>
+                  <Trash2 className="w-3.5 h-3.5"/>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// PATIENTS VIEW
+// ══════════════════════════════════════════════════════════════════
+const ABO_OPTS = ['A','B','AB','O'] as const;
+const ALLERGY_DRUG_SUGG = ['Pénicilline','Amoxicilline','Ibuprofène','Aspirine','Sulfamides','Morphine','Codéine','Tétracyclines'];
+const ALLERGY_OTHER_SUGG = ['Arachides','Latex','Pollen','Lait','Gluten','Nickel'];
+
+function ageFromDob(iso: string): number {
+  const b = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(b.getTime())) return 0;
+  const t = new Date();
+  let a = t.getFullYear() - b.getFullYear();
+  const m = t.getMonth() - b.getMonth();
+  if (m < 0 || (m === 0 && t.getDate() < b.getDate())) a--;
+  return Math.max(0, a);
+}
+
+function formatBirthFr(iso: string | undefined | null, fallbackAge: number): string {
+  if (!iso) return `${fallbackAge} ans`;
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return `${fallbackAge} ans`;
+  const label = d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+  const a = ageFromDob(iso);
+  return `${label} (${a} ans)`;
+}
+
+function parseAboRhFromBlood(bt: string): { abo: typeof ABO_OPTS[number] | ''; rh: 'positif' | 'negatif' } {
+  const s = (bt || '').trim().toUpperCase();
+  if (s.endsWith('+')) return { abo: (s.slice(0, -1) as (typeof ABO_OPTS)[number]) || '', rh: 'positif' };
+  if (s.endsWith('-')) return { abo: (s.slice(0, -1) as (typeof ABO_OPTS)[number]) || '', rh: 'negatif' };
+  return { abo: '', rh: 'positif' };
+}
+
+function bloodPreview(abo: string, rh: 'positif' | 'negatif'): string {
+  if (!abo) return '—';
+  return `${abo}${rh === 'positif' ? '+' : '-'}`;
+}
+
+const PatientsView = () => {
+  const { dark } = useTheme();
+  const inp = useInpClass();
+  const [patients,setPatients]=useState<Patient[]>([]);
+  const [rooms,setRooms]=useState<Room[]>([]);
+  const [sel,setSel]=useState<Patient|null>(null);
+  const [search,setSearch]=useState('');
+  const [modal,setModal]=useState<'add'|'edit'|null>(null);
+  const [saving,setSaving]=useState(false);
+  const [busy,setBusy]=useState(true);
+  const [tab,setTab]=useState<'identite'|'traitements'|'ordonnances'>('identite');
+  const [treatModal,setTreatModal]=useState<null | { mode: 'add' } | { mode: 'edit'; row: PatientTreatment }>(null);
+  const [treatSaving,setTreatSaving]=useState(false);
+  const [treatForm,setTreatForm]=useState({
+    med_name: '',
+    dose: '',
+    frequency: '',
+    route: 'Per os',
+    start_date: '',
+    end_date: '',
+    origin: 'Hospitalisation',
+    notes: '',
+    active: true,
+  });
+  const [form,setForm]=useState({
+    first_name:'',last_name:'',age:'',weight:'',blood_type:'A+',diagnostic:'',room_id:'1',bed:'1',allergies:[] as string[],notes:'',
+    date_naissance:'', groupe_sanguin:'', antecedents:'', traitement_en_cours:'',
+    groupe_abo: 'A' as string,
+    rhesus: 'positif' as 'positif' | 'negatif',
+    ph_C:0, ph_c:0, ph_E:0, ph_e:0, ph_K:0, ph_k:0,
+    drug_allergies: [] as string[],
+    other_allergies: [] as string[],
+  });
+
+  const load=useCallback(async()=>{
+    setBusy(true);
+    try { 
+      const [p,r]=await Promise.all([api('/api/patients'),api('/api/rooms')]); 
+      const sanitized = (p || []).map((patient: any) => ({
+        ...patient,
+        allergies: (() => {
+          try {
+            const a = patient.allergies;
+            if (typeof a === 'string' && (a.startsWith('[') || a.startsWith('{'))) {
+              return JSON.parse(a);
+            }
+            return Array.isArray(a) ? a : [];
+          } catch {
+            return [];
+          }
+        })(),
+        drug_allergies: Array.isArray(patient.drug_allergies) ? patient.drug_allergies : [],
+        other_allergies: Array.isArray(patient.other_allergies) ? patient.other_allergies : []
+      }));
+      setPatients(sanitized); 
+      setRooms(r); 
+    }
+    finally { setBusy(false); }
+  },[]);
+  useEffect(()=>{load();},[load]);
+
+  const filtered=patients.filter(p=>p.full_name?.toLowerCase().includes(search.toLowerCase())||p.diagnostic?.toLowerCase().includes(search.toLowerCase()));
+
+  const patientHasAlert = (p: Patient) =>
+    (p.allergies?.length ?? 0) > 0 ||
+    (p.drug_allergies?.length ?? 0) > 0 ||
+    (p.other_allergies?.length ?? 0) > 0;
+
+  const toggleArr = (key: 'drug_allergies' | 'other_allergies', a: string) =>
+    setForm((f) => ({
+      ...f,
+      [key]: (f[key] as string[]).includes(a) ? (f[key] as string[]).filter((x) => x !== a) : [...(f[key] as string[]), a],
+    }));
+
+  const save=async()=>{
+    setSaving(true);
+    const editedId = modal === 'edit' && sel ? sel.id : null;
+    const bt = bloodPreview(form.groupe_abo, form.rhesus);
+    const body={
+      first_name:form.first_name,last_name:form.last_name,age:parseInt(form.age,10),weight:form.weight,blood_type: bt || form.blood_type,
+      diagnostic:form.diagnostic,room_id:parseInt(form.room_id,10),bed:parseInt(form.bed,10),allergies:[] as string[],notes:form.notes,
+      date_naissance: form.date_naissance || null,
+      groupe_sanguin: form.groupe_sanguin || bt,
+      antecedents: form.antecedents || null,
+      traitement_en_cours: form.traitement_en_cours || null,
+      groupe_abo: form.groupe_abo || null,
+      rhesus: form.rhesus,
+      ph_C: form.ph_C ? 1 : 0,
+      ph_c: form.ph_c ? 1 : 0,
+      ph_E: form.ph_E ? 1 : 0,
+      ph_e: form.ph_e ? 1 : 0,
+      ph_K: form.ph_K ? 1 : 0,
+      ph_k: form.ph_k ? 1 : 0,
+      drug_allergies: form.drug_allergies,
+      other_allergies: form.other_allergies,
+    };
+    try {
+      if(modal==='edit'&&sel) await api(`/api/patients/${sel.id}`,{method:'PUT',body:JSON.stringify(body)});
+      else await api('/api/patients',{method:'POST',body:JSON.stringify(body)});
+      setModal(null);
+      await load();
+      if (editedId) {
+        try {
+          const full = await api(`/api/patients/${editedId}`);
+          setSel(full as Patient);
+        } catch { /* ignore */ }
+      }
+    } catch(e:any){ alert(e.message); }
+    finally { setSaving(false); }
+  };
+
+  const del=async(p:Patient)=>{
+    if(!confirm(`Supprimer le dossier de ${p.full_name} ?`)) return;
+    await api(`/api/patients/${p.id}`,{method:'DELETE'});
+    if(sel?.id===p.id) setSel(null);
+    await load();
+  };
+
+  const openEdit=(p:Patient)=>{
+    const { abo, rh } = parseAboRhFromBlood(p.blood_type_display || p.blood_type || '');
+    const parsedDrugAllergies = (() => {
+      try {
+        const da = p.drug_allergies;
+        if (typeof da === 'string' && (da.startsWith('[') || da.startsWith('{'))) {
+          return JSON.parse(da);
+        }
+        return Array.isArray(da) ? da : [];
+      } catch {
+        return [];
+      }
+    })();
+    const parsedOtherAllergies = (() => {
+      try {
+        const oa = p.other_allergies;
+        if (typeof oa === 'string' && (oa.startsWith('[') || oa.startsWith('{'))) {
+          return JSON.parse(oa);
+        }
+        return Array.isArray(oa) ? oa : [];
+      } catch {
+        return [];
+      }
+    })();
+    setForm({
+      first_name:p.first_name,last_name:p.last_name,age:String(p.age),weight:p.weight,blood_type:p.blood_type,diagnostic:p.diagnostic,
+      room_id:String(p.room_id),bed:String(p.bed),
+      allergies: [],
+      notes:p.notes||'',
+      date_naissance: p.date_naissance || '',
+      groupe_sanguin: p.groupe_sanguin || p.blood_type || '',
+      antecedents: p.antecedents || '',
+      traitement_en_cours: p.traitement_en_cours || '',
+      groupe_abo: (p.groupe_abo && p.groupe_abo.trim()) ? p.groupe_abo : (abo || 'A'),
+      rhesus: (p.rhesus === 'negatif' || p.rhesus === 'positif') ? p.rhesus : rh,
+      ph_C: p.ph_C ? 1 : 0,
+      ph_c: p.ph_c ? 1 : 0,
+      ph_E: p.ph_E ? 1 : 0,
+      ph_e: p.ph_e ? 1 : 0,
+      ph_K: p.ph_K ? 1 : 0,
+      ph_k: p.ph_k ? 1 : 0,
+      drug_allergies: parsedDrugAllergies,
+      other_allergies: parsedOtherAllergies,
+    });
+    setModal('edit');
+  };
+
+  const selectPatientRow = async (p: Patient) => {
+    try {
+      const full = await api(`/api/patients/${p.id}`);
+      setSel(full as Patient);
+    } catch {
+      setSel(p);
+    }
+    setTab('identite');
+  };
+
+  const openTreatAdd = () => {
+    setTreatForm({
+      med_name: '',
+      dose: '',
+      frequency: '',
+      route: 'Per os',
+      start_date: new Date().toISOString().slice(0, 10),
+      end_date: '',
+      origin: 'Hospitalisation',
+      notes: '',
+      active: true,
+    });
+    setTreatModal({ mode: 'add' });
+  };
+
+  const openTreatEdit = (row: PatientTreatment) => {
+    setTreatForm({
+      med_name: row.med_name,
+      dose: row.dose || '',
+      frequency: row.frequency || '',
+      route: row.route || 'Per os',
+      start_date: (row.start_date || '').slice(0, 10),
+      end_date: (row.end_date || '').slice(0, 10),
+      origin: row.origin || 'Hospitalisation',
+      notes: row.notes || '',
+      active: row.active !== 0,
+    });
+    setTreatModal({ mode: 'edit', row });
+  };
+
+  const saveTreatment = async () => {
+    if (!sel || !treatForm.med_name.trim()) return;
+    setTreatSaving(true);
+    try {
+      const body = {
+        med_name: treatForm.med_name.trim(),
+        dose: treatForm.dose,
+        frequency: treatForm.frequency,
+        route: treatForm.route,
+        start_date: treatForm.start_date || null,
+        end_date: treatForm.end_date || null,
+        origin: treatForm.origin,
+        notes: treatForm.notes,
+        active: treatForm.active,
+      };
+      if (treatModal?.mode === 'add') {
+        await api(`/api/patients/${sel.id}/current-treatments`, { method: 'POST', body: JSON.stringify(body) });
+      } else if (treatModal?.mode === 'edit') {
+        await api(`/api/patients/${sel.id}/current-treatments/${treatModal.row.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        });
+      }
+      setTreatModal(null);
+      const full = await api(`/api/patients/${sel.id}`);
+      setSel(full as Patient);
+      await load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : 'Erreur');
+    } finally {
+      setTreatSaving(false);
+    }
+  };
+
+  const deleteTreatment = async (tid: number) => {
+    if (!sel || !confirm('Supprimer ce traitement ?')) return;
+    try {
+      await api(`/api/patients/${sel.id}/current-treatments/${tid}`, { method: 'DELETE' });
+      const full = await api(`/api/patients/${sel.id}`);
+      setSel(full as Patient);
+      await load();
+    } catch (e) {
+      console.error('Erreur suppression traitement', e);
+    }
+  };
+
+  const initials=(n?:string)=>n?.split(' ').map((w:string)=>w[0]).join('').slice(0,2)??'??';
+
+  const sidebar=dark?'bg-gray-900 border-gray-700':'bg-gray-50 border-gray-200';
+  const card=dark?'bg-gray-800 border-gray-700':'bg-white border-gray-200';
+  const tabActive=dark?'bg-gray-700 text-white':'bg-white text-gray-900 shadow-sm';
+  const tabInactive=dark?'text-gray-400 hover:text-gray-200':'text-gray-500 hover:text-gray-700';
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* List */}
+      <div className={`w-80 flex-shrink-0 border-r ${sidebar} flex flex-col`}>
+        <div className={`p-4 border-b ${dark?'border-gray-700 bg-gray-900':'border-gray-200 bg-white'} space-y-3`}>
+          <div className="flex items-center justify-between">
+            <h1 className={`text-lg font-black ${dark?'text-white':'text-gray-900'}`}>Patients</h1>
+            <button onClick={()=>{setForm({first_name:'',last_name:'',age:'',weight:'',blood_type:'A+',diagnostic:'',room_id:'1',bed:'1',allergies:[],notes:'',date_naissance:'',groupe_sanguin:'',antecedents:'',traitement_en_cours:'',groupe_abo:'A',rhesus:'positif',ph_C:0,ph_c:0,ph_E:0,ph_e:0,ph_K:0,ph_k:0,drug_allergies:[],other_allergies:[]});setModal('add');}}
+              className="flex items-center gap-1.5 text-sm text-white bg-teal-600 hover:bg-teal-700 px-3 py-1.5 rounded-xl font-bold transition-colors">
+              <Plus className="w-3.5 h-3.5"/> Ajouter
+            </button>
+          </div>
+          <div className="relative">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5"/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher..." className={`${inp} pl-9`}/>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {busy?<Spinner/>:filtered.map(p=>(
+            <button key={p.id} type="button" onClick={() => void selectPatientRow(p)}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left border-b transition-all
+                ${sel?.id===p.id
+                  ? dark?'bg-teal-900/50 border-l-2 border-l-teal-400 border-gray-700':'bg-teal-50 border-l-2 border-l-teal-500 border-gray-100'
+                  : dark?'bg-gray-900 border-gray-800 hover:bg-gray-800':'bg-white border-gray-100 hover:bg-gray-50'}`}>
+              {p.photo ? (
+                <img src={p.photo} alt={p.full_name} className="w-9 h-9 rounded-full object-cover flex-shrink-0 border-2 border-white shadow-sm"/>
+              ) : (
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-xs flex-shrink-0 ${dark?'bg-blue-900 text-blue-300':'bg-blue-100 text-blue-700'}`}>{initials(p.full_name)}</div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className={`font-bold text-sm truncate ${sel?.id===p.id?'text-teal-600 dark:text-teal-400':dark?'text-white':'text-gray-800'}`}>{p.full_name}</p>
+                <p className={`text-xs truncate ${dark?'text-gray-500':'text-gray-400'}`}>{p.diagnostic} · Salle {p.room_id}</p>
+              </div>
+              {patientHasAlert(p) && <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0"/>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Detail */}
+      <div className={`flex-1 overflow-y-auto ${dark?'bg-gray-850 bg-gray-900':'bg-white'}`}>
+        {!sel?(
+          <div className={`flex flex-col items-center justify-center h-full ${dark?'text-gray-600':'text-gray-300'}`}>
+            <Users className="w-14 h-14 mb-4"/>
+            <p className={`text-lg font-bold ${dark?'text-gray-500':'text-gray-400'}`}>Sélectionnez un patient</p>
+          </div>
+        ):(
+          <motion.div key={sel.id} initial={{opacity:0,x:10}} animate={{opacity:1,x:0}} className="p-8 space-y-5 max-w-3xl">
+            <div className={`flex gap-1 p-1 rounded-xl ${dark?'bg-gray-800':'bg-gray-100'}`}>
+              {([
+                { id: 'identite' as const, label: 'Identité & contexte' },
+                { id: 'traitements' as const, label: 'Traitements en cours' },
+                { id: 'ordonnances' as const, label: 'Ordonnances' },
+              ]).map((t) => (
+                <button key={t.id} type="button" onClick={() => setTab(t.id)}
+                  className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all ${tab === t.id ? tabActive : tabInactive}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {tab === 'identite' && (
+              <div className="space-y-5">
+                <div className={`flex items-start gap-4 rounded-2xl p-5 border ${dark ? 'bg-gray-800 border-gray-700' : 'bg-gradient-to-br from-teal-50 to-blue-50 border-teal-100'}`}>
+                  <PhotoUpload
+                    patientId={sel.id}
+                    current={sel.photo || ''}
+                    onUpdated={(b64) => {
+                      setSel({ ...sel, photo: b64 });
+                      setPatients((pts) => pts.map((p) => (p.id === sel.id ? { ...p, photo: b64 } : p)));
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <h2 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>{sel.full_name}</h2>
+                    <p className={`text-sm mt-1 ${dark ? 'text-gray-300' : 'text-gray-600'}`}>
+                      {formatBirthFr(sel.date_naissance, sel.age)}
+                    </p>
+                    <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Poids : <span className="font-bold">{sel.weight}</span> · Salle {sel.room_id} · Lit {sel.bed}
+                    </p>
+                    <span className={`inline-block mt-2 text-xs font-black px-3 py-1 rounded-full ${dark ? 'bg-teal-900 text-teal-200' : 'bg-teal-600 text-white'}`}>
+                      {sel.diagnostic}
+                    </span>
+                  </div>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button type="button" onClick={() => openEdit(sel)} className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${dark?'bg-gray-700 border-gray-600 hover:border-teal-500 text-gray-400 hover:text-teal-400':'bg-white border-gray-200 hover:border-teal-400 text-gray-500 hover:text-teal-600 shadow-sm'}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                    <button type="button" onClick={() => del(sel)} className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all ${dark?'bg-gray-700 border-gray-600 hover:border-red-500 text-gray-400 hover:text-red-400':'bg-white border-gray-200 hover:border-red-400 text-gray-500 hover:text-red-500 shadow-sm'}`}><Trash2 className="w-3.5 h-3.5"/></button>
+                  </div>
+                </div>
+
+                <div className={`rounded-xl p-4 border space-y-2 ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                  <p className={`text-sm ${dark ? 'text-gray-200' : 'text-gray-800'}`}>
+                    <span className="font-bold">Groupe sanguin :</span>{' '}
+                    {sel.blood_type_display || sel.groupe_sanguin || sel.blood_type || '—'}
+                  </p>
+                  <p className={`text-sm font-mono ${dark ? 'text-gray-300' : 'text-gray-700'}`}>
+                    <span className="font-bold font-sans">Phénotype Rh/Kell :</span> {sel.phenotype_display || '—'}
+                  </p>
+                </div>
+
+                <div className={`rounded-xl p-4 border ${dark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-100'}`}>
+                  <p className={`text-xs font-bold uppercase mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Antécédents</p>
+                  <p className={`text-sm ${dark ? 'text-gray-200' : 'text-gray-800'}`}>
+                    {sel.antecedents?.trim() ? sel.antecedents : 'Aucun antécédent renseigné'}
+                  </p>
+                </div>
+
+                <div className={`rounded-xl p-4 border ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                  <p className={`text-xs font-bold uppercase mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Allergies</p>
+                  {(sel.drug_allergies?.length || sel.other_allergies?.length || sel.allergies?.length) ? (
+                    <div className="space-y-3">
+                      {(sel.drug_allergies?.length || 0) > 0 && (
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <AlertTriangle className="w-4 h-4 text-red-500" />
+                            <span className="text-sm font-bold text-red-700">Allergies médicamenteuses</span>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {(sel.drug_allergies || []).map((a) => (
+                              <Badge key={a} text={a} color="red" />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {(sel.other_allergies?.length || 0) > 0 && (
+                        <div>
+                          <p className="text-sm font-bold text-amber-800 mb-1">Autres allergies</p>
+                          <div className="flex flex-wrap gap-1">
+                            {(sel.other_allergies || []).map((a) => (
+                              <Badge key={a} text={a} color="amber" />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {(!sel.drug_allergies?.length && !sel.other_allergies?.length && (sel.allergies?.length || 0) > 0) && (
+                        <div className="flex flex-wrap gap-1">
+                          {sel.allergies.map((a) => (
+                            <Badge key={typeof a === 'string' ? a : a.medication} text={typeof a === 'string' ? a : a.medication} color="red" />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className={`text-sm ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Aucune allergie connue</p>
+                  )}
+                </div>
+
+                {sel.notes?.trim() ? (
+                  <div className={`rounded-xl p-4 border ${dark ? 'bg-amber-900/20 border-amber-800' : 'bg-amber-50 border-amber-100'}`}>
+                    <p className={`text-xs font-bold uppercase mb-1 ${dark ? 'text-amber-200' : 'text-amber-800'}`}>Notes cliniques</p>
+                    <p className={`text-sm ${dark ? 'text-gray-200' : 'text-gray-800'}`}>{sel.notes}</p>
+                  </div>
+                ) : null}
+
+                {(() => {
+                  const acc = sel.guardian ?? sel.guardians?.[0];
+                  return acc ? (
+                    <div className={`rounded-xl p-4 border ${dark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-100'}`}>
+                      <p className={`text-xs font-bold uppercase mb-1 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Accompagnateur</p>
+                      <p className={`font-bold ${dark ? 'text-white' : 'text-gray-900'}`}>{acc.name}</p>
+                      <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
+                        {acc.relationship || '—'}
+                        {acc.phone ? ` · ${acc.phone}` : ''}
+                      </p>
+                    </div>
+                  ) : null;
+                })()}
+              </div>
+            )}
+
+            {tab === 'traitements' && (
+              <div className="space-y-4">
+                <div className="flex justify-end">
+                  <button type="button" onClick={openTreatAdd}
+                    className="flex items-center gap-2 text-sm font-bold px-4 py-2 rounded-xl bg-teal-600 text-white hover:bg-teal-700 transition-colors">
+                    <Plus className="w-4 h-4" /> Ajouter un traitement
+                  </button>
+                </div>
+                {(sel.current_treatments || []).length === 0 ? (
+                  <p className={`text-sm text-center py-8 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Aucun traitement en cours enregistré</p>
+                ) : (
+                  <div className="space-y-3">
+                    {(sel.current_treatments || []).map((tr) => (
+                      <div key={tr.id} className={`rounded-xl border p-4 ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+                        <div className="flex justify-between gap-2">
+                          <p className={`font-black ${dark ? 'text-white' : 'text-gray-900'}`}>{tr.med_name}</p>
+                          <div className="flex gap-2 flex-shrink-0">
+                            <button type="button" onClick={() => openTreatEdit(tr)} className="text-teal-500 font-bold text-sm">Éditer</button>
+                            <button type="button" onClick={() => void deleteTreatment(tr.id)} className="text-red-500 font-bold text-sm">Supprimer</button>
+                          </div>
+                        </div>
+                        <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
+                          {tr.dose || '—'} · {tr.frequency || '—'} · {tr.route || '—'}
+                        </p>
+                        <p className={`text-xs mt-1 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
+                          {(tr.start_date || '').slice(0, 10) || '—'} → {tr.end_date ? (tr.end_date as string).slice(0, 10) : 'en cours'}
+                        </p>
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            tr.origin === 'Domicile' ? 'bg-blue-100 text-blue-800' :
+                            tr.origin === 'Urgences' ? 'bg-orange-100 text-orange-800' :
+                            tr.origin === 'Transfert' ? 'bg-gray-200 text-gray-800' :
+                            'bg-teal-100 text-teal-800'
+                          }`}>{tr.origin || 'Hospitalisation'}</span>
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${tr.active ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-200 text-gray-600'}`}>
+                            {tr.active ? 'Actif' : 'Terminé'}
+                          </span>
+                        </div>
+                        {tr.notes?.trim() ? <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>{tr.notes}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'ordonnances' && <OrdonnancePanel patient={sel} />}
+          </motion.div>
+        )}
+      </div>
+
+      <AnimatePresence>
+        {modal && (
+          <Modal title={modal === 'add' ? 'Nouveau patient' : 'Modifier patient'} onClose={() => setModal(null)} width="max-w-xl">
+            <div className="space-y-6">
+              <div>
+                <p className={`text-xs font-black uppercase tracking-wider mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>1 — Identité</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Prénom" required><input className={inp} value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} placeholder="Yanis" /></Field>
+                  <Field label="Nom" required><input className={inp} value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} placeholder="Belkacem" /></Field>
+                  <Field label="Date de naissance"><input className={inp} type="date" value={form.date_naissance} onChange={(e) => setForm((f) => ({ ...f, date_naissance: e.target.value }))} /></Field>
+                  <Field label="Âge (ans)" required><input className={inp} type="number" min="0" max="18" value={form.age} onChange={(e) => setForm((f) => ({ ...f, age: e.target.value }))} /></Field>
+                  <Field label="Poids"><input className={inp} value={form.weight} onChange={(e) => setForm((f) => ({ ...f, weight: e.target.value }))} placeholder="21kg" /></Field>
+                  <Field label="Photo"><p className={`text-xs ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Après création, ajoutez la photo depuis le dossier patient.</p></Field>
+                </div>
+              </div>
+              <div>
+                <p className={`text-xs font-black uppercase tracking-wider mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>2 — Hospitalisation</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Salle"><select className={inp} value={form.room_id} onChange={(e) => setForm((f) => ({ ...f, room_id: e.target.value }))}>{rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></Field>
+                  <Field label="Lit"><select className={inp} value={form.bed} onChange={(e) => setForm((f) => ({ ...f, bed: e.target.value }))}><option value="1">Lit 1</option><option value="2">Lit 2</option></select></Field>
+                </div>
+                <Field label="Diagnostic" required><input className={inp} value={form.diagnostic} onChange={(e) => setForm((f) => ({ ...f, diagnostic: e.target.value }))} placeholder="Pneumonie..." /></Field>
+              </div>
+              <div>
+                <p className={`text-xs font-black uppercase tracking-wider mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>3 — Groupe sanguin &amp; phénotype</p>
+                <p className={`text-xs mb-2 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>Groupe ABO</p>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {ABO_OPTS.map((x) => (
+                    <button key={x} type="button" onClick={() => setForm((f) => ({ ...f, groupe_abo: x }))}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-bold border transition-all ${form.groupe_abo === x ? 'bg-teal-600 text-white border-teal-600' : dark ? 'border-gray-600 text-gray-300' : 'border-gray-200 text-gray-700'}`}>{x}</button>
+                  ))}
+                </div>
+                <p className={`text-xs mb-2 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>Rhésus</p>
+                <div className="flex gap-2 mb-3">
+                  {(['positif', 'negatif'] as const).map((r) => (
+                    <button key={r} type="button" onClick={() => setForm((f) => ({ ...f, rhesus: r }))}
+                      className={`px-4 py-1.5 rounded-lg text-sm font-bold border transition-all ${form.rhesus === r ? 'bg-teal-600 text-white border-teal-600' : dark ? 'border-gray-600 text-gray-300' : 'border-gray-200 text-gray-700'}`}>
+                      {r === 'positif' ? 'Positif' : 'Négatif'}
+                    </button>
+                  ))}
+                </div>
+                <p className={`text-xs mb-2 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>Phénotype érythrocytaire</p>
+                <div className="flex flex-wrap gap-3 items-center">
+                  {(['ph_C', 'ph_c', 'ph_E', 'ph_e', 'ph_K', 'ph_k'] as const).map((k) => (
+                    <label key={k} className={`flex items-center gap-1 text-sm font-bold cursor-pointer ${dark ? 'text-gray-300' : 'text-gray-700'}`}>
+                      <input type="checkbox" className="rounded border-gray-300" checked={!!form[k]} onChange={(e) => setForm((f) => ({ ...f, [k]: e.target.checked ? 1 : 0 }))} />
+                      {k.replace('ph_', '')}
+                    </label>
+                  ))}
+                </div>
+                <p className={`text-sm mt-3 font-mono ${dark ? 'text-teal-300' : 'text-teal-800'}`}>
+                  Résumé : {bloodPreview(form.groupe_abo, form.rhesus)} | {( ['ph_C', 'ph_c', 'ph_E', 'ph_e', 'ph_K', 'ph_k'] as const).map((k) => `${k.replace('ph_', '')}${form[k] ? '+' : '-'}`).join(' ')}
+                </p>
+              </div>
+              <div>
+                <p className={`text-xs font-black uppercase tracking-wider mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>4 — Contexte médical</p>
+                <Field label="Antécédents"><textarea className={inp} rows={3} value={form.antecedents} onChange={(e) => setForm((f) => ({ ...f, antecedents: e.target.value }))} placeholder="Asthme, cardiopathie congénitale..." /></Field>
+                <Field label="Traitement en cours (admission)"><textarea className={inp} rows={2} value={form.traitement_en_cours} onChange={(e) => setForm((f) => ({ ...f, traitement_en_cours: e.target.value }))} placeholder="Ex. antibiothérapie IV…" /></Field>
+                <Field label="Notes cliniques"><textarea className={inp} rows={2} value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} /></Field>
+              </div>
+              <div>
+                <p className={`text-xs font-black uppercase tracking-wider mb-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>5 — Allergies</p>
+                <Field label="Allergies médicamenteuses">
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {ALLERGY_DRUG_SUGG.map((a) => (
+                      <button key={a} type="button" onClick={() => toggleArr('drug_allergies', a)}
+                        className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${form.drug_allergies.includes(a) ? 'bg-red-100 text-red-700 border-red-300' : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-gray-400'}`}>{a}</button>
+                    ))}
+                  </div>
+                </Field>
+                <Field label="Autres allergies">
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {ALLERGY_OTHER_SUGG.map((a) => (
+                      <button key={a} type="button" onClick={() => toggleArr('other_allergies', a)}
+                        className={`text-xs px-3 py-1.5 rounded-full border font-semibold transition-all ${form.other_allergies.includes(a) ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-gray-400'}`}>{a}</button>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => void save()} disabled={saving || !form.first_name || !form.last_name || !form.age || !form.diagnostic}
+                  className="flex-1 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-200 disabled:text-gray-400 text-white font-black rounded-xl transition-colors flex items-center justify-center gap-2">
+                  <Save className="w-4 h-4" /> {saving ? 'Enregistrement...' : 'Enregistrer'}
+                </button>
+                <button type="button" onClick={() => setModal(null)} className={`px-5 py-3 border rounded-xl font-bold transition-colors ${inp} w-auto`}>Annuler</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {treatModal && sel && (
+          <Modal title={treatModal.mode === 'add' ? 'Nouveau traitement' : 'Modifier traitement'} onClose={() => setTreatModal(null)} width="max-w-lg">
+            <div className="space-y-3">
+              <Field label="Médicament / traitement" required>
+                <input className={inp} value={treatForm.med_name} onChange={(e) => setTreatForm((f) => ({ ...f, med_name: e.target.value }))} placeholder="Nom" />
+              </Field>
+              <Field label="Posologie / dose">
+                <input className={inp} value={treatForm.dose} onChange={(e) => setTreatForm((f) => ({ ...f, dose: e.target.value }))} placeholder="500 mg" />
+              </Field>
+              <Field label="Fréquence">
+                <input className={inp} value={treatForm.frequency} onChange={(e) => setTreatForm((f) => ({ ...f, frequency: e.target.value }))} placeholder="3x/jour, si besoin..." />
+              </Field>
+              <Field label="Voie d&apos;administration">
+                <select className={inp} value={treatForm.route} onChange={(e) => setTreatForm((f) => ({ ...f, route: e.target.value }))}>
+                  <option>Per os</option>
+                  <option>IV</option>
+                  <option>IM</option>
+                  <option>SC</option>
+                  <option>Nébulisation</option>
+                  <option>Autre</option>
+                </select>
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Date de début"><input className={inp} type="date" value={treatForm.start_date} onChange={(e) => setTreatForm((f) => ({ ...f, start_date: e.target.value }))} /></Field>
+                <Field label="Date de fin (optionnel)"><input className={inp} type="date" value={treatForm.end_date} onChange={(e) => setTreatForm((f) => ({ ...f, end_date: e.target.value }))} /></Field>
+              </div>
+              <Field label="Origine">
+                <select className={inp} value={treatForm.origin} onChange={(e) => setTreatForm((f) => ({ ...f, origin: e.target.value }))}>
+                  <option>Hospitalisation</option>
+                  <option>Domicile</option>
+                  <option>Urgences</option>
+                  <option>Transfert</option>
+                </select>
+              </Field>
+              <Field label="Remarque"><textarea className={inp} rows={2} value={treatForm.notes} onChange={(e) => setTreatForm((f) => ({ ...f, notes: e.target.value }))} /></Field>
+              <label className={`flex items-center gap-2 text-sm font-bold ${dark ? 'text-gray-300' : 'text-gray-700'}`}>
+                <input type="checkbox" checked={treatForm.active} onChange={(e) => setTreatForm((f) => ({ ...f, active: e.target.checked }))} />
+                Traitement actif
+              </label>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => void saveTreatment()} disabled={treatSaving || !treatForm.med_name.trim()}
+                  className="flex-1 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-200 text-white font-black rounded-xl">{treatSaving ? '...' : 'Enregistrer'}</button>
+                <button type="button" onClick={() => setTreatModal(null)} className={`px-5 py-3 border rounded-xl font-bold ${inp}`}>Annuler</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// DOCTORS VIEW
+// ══════════════════════════════════════════════════════════════════
+const DoctorsView = () => {
+  const { dark } = useTheme();
+  const inp = useInpClass();
+  const [doctors,setDoctors]=useState<Doctor[]>([]);
+  const [busy,setBusy]=useState(true);
+  const [modal,setModal]=useState(false);
+  const [editId,setEditId]=useState<number|null>(null);
+  const [form,setForm]=useState({rfid_uid:'',name:'',role:'Médecin',username:'',password:'',pin:''});
+  const [pwdForm,setPwdForm]=useState({old_password:'',new_password:'',confirm_password:''});
+  const [saving,setSaving]=useState(false);
+  const [pwdUpdating,setPwdUpdating]=useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [pwdError, setPwdError] = useState('');
+  const [pwdSuccess, setPwdSuccess] = useState('');
+
+  const load=useCallback(async()=>{ setBusy(true); try { setDoctors(await api('/api/doctors')); } finally { setBusy(false); } },[]);
+  useEffect(()=>{load();},[load]);
+
+  const save=async()=>{
+    if(!form.rfid_uid||!form.name||!form.pin) return;
+    if(!editId && !form.password) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      if(editId) {
+        await api(`/api/doctors/${editId}`,{method:'PUT',body:JSON.stringify({name:form.name,role:form.role,username:form.username})});
+      } else {
+        await api('/api/doctors',{method:'POST',body:JSON.stringify(form)});
+      }
+      setModal(false); setEditId(null); setForm({rfid_uid:'',name:'',role:'Médecin',username:'',password:'',pin:''});
+      setPwdForm({old_password:'',new_password:'',confirm_password:''});
+      await load();
+    } catch(e:any){ setSaveError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  };
+
+  const updatePassword=async()=>{
+    if(!editId||!pwdForm.old_password||!pwdForm.new_password) return;
+    if(pwdForm.new_password!==pwdForm.confirm_password) { setPwdError('Les mots de passe ne correspondent pas'); return; }
+    setPwdUpdating(true);
+    setPwdError('');
+    try {
+      await api(`/api/doctors/${editId}/password`,{method:'PUT',body:JSON.stringify({old_password:pwdForm.old_password,new_password:pwdForm.new_password})});
+      setPwdSuccess('Mot de passe mis à jour ✓');
+      setTimeout(() => setPwdSuccess(''), 3000);
+      setPwdForm({old_password:'',new_password:'',confirm_password:''});
+    } catch(e:any){ setPwdError(e instanceof Error ? e.message : String(e)); }
+    finally { setPwdUpdating(false); }
+  };
+
+  const del=async(id:number,name:string)=>{ if(!confirm(`Supprimer ${name} ?`)) return; await api(`/api/doctors/${id}`,{method:'DELETE'}); await load(); };
+  const openEdit=(d:Doctor)=>{ setForm({rfid_uid:d.rfid_uid,name:d.name,role:d.role,username:d.username||'',password:'',pin:'****'}); setEditId(d.id); setModal(true); setPwdForm({old_password:'',new_password:'',confirm_password:''}); };
+
+  const card=dark?'bg-gray-800 border-gray-700':'bg-white border-gray-200';
+
+  return (
+    <div className="p-8 max-w-4xl">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className={`text-2xl font-black ${dark?'text-white':'text-gray-900'}`}>Équipe médicale</h1>
+          <p className={`text-sm mt-0.5 ${dark?'text-gray-400':'text-gray-500'}`}>Médecins autorisés à utiliser le système</p>
+        </div>
+        <button onClick={()=>{setEditId(null);setForm({rfid_uid:'',name:'',role:'Médecin',username:'',password:'',pin:''});setModal(true);setPwdForm({old_password:'',new_password:'',confirm_password:''});}}
+          className="flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white font-bold px-4 py-2.5 rounded-xl transition-colors shadow-sm">
+          <Plus className="w-4 h-4"/> Ajouter
+        </button>
+      </div>
+
+      {busy?<Spinner/>:doctors.length===0?(
+        <div className={`text-center py-16 ${dark?'text-gray-500':'text-gray-400'}`}><Stethoscope className="w-14 h-14 mx-auto mb-4 opacity-30"/><p className="text-lg font-bold">Aucun médecin enregistré</p></div>
+      ):(
+        <div className="grid grid-cols-2 gap-4">
+          {doctors.map(d=>(
+            <div key={d.id} className={`${card} border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all`}>
+              <div className="flex items-start gap-4">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black text-lg border ${dark?'bg-violet-900/50 border-violet-800 text-violet-300':'bg-violet-100 border-violet-200 text-violet-700'}`}>
+                  {d.name.split(' ').map((w:string)=>w[0]).join('').slice(0,2)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className={`font-black ${dark?'text-white':'text-gray-900'}`}>{d.name}</p>
+                  <p className={`text-xs ${dark?'text-gray-400':'text-gray-500'}`}>@{d.username}</p>
+                  <Badge text={d.role} color="blue"/>
+                  <div className={`flex items-center gap-1.5 mt-2 text-xs font-mono ${dark?'text-gray-400':'text-gray-400'}`}>
+                    <BadgeCheck className="w-3.5 h-3.5 text-teal-500"/>{d.rfid_uid}
+                  </div>
+                </div>
+                <div className="flex gap-1.5">
+                  <button onClick={()=>openEdit(d)} className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-all ${dark?'border-gray-600 hover:border-teal-500 text-gray-400 hover:text-teal-400':'border-gray-200 hover:border-teal-400 text-gray-400 hover:text-teal-600'}`}><Edit2 className="w-3.5 h-3.5"/></button>
+                  <button onClick={()=>del(d.id,d.name)} className={`w-8 h-8 rounded-lg border flex items-center justify-center transition-all ${dark?'border-gray-600 hover:border-red-500 text-gray-400 hover:text-red-400':'border-gray-200 hover:border-red-400 text-gray-400 hover:text-red-500'}`}><Trash2 className="w-3.5 h-3.5"/></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <AnimatePresence>
+        {modal&&(
+          <Modal title={editId?'Modifier médecin':'Nouveau médecin'} onClose={()=>setModal(false)}>
+            <div className="space-y-5">
+              <Field label="Nom complet" required><input className={inp} value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="Dr. KARA Abderraouf"/></Field>
+              <Field label="Rôle"><select className={inp} value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}>{['Médecin Chef','Médecin','Pédiatre','Interne','Infirmier(e)'].map(r=><option key={r}>{r}</option>)}</select></Field>
+              <Field label="Nom d'utilisateur" required><input className={inp} value={form.username} onChange={e=>setForm(f=>({...f,username:e.target.value.toLowerCase()}))} placeholder="Ex: kara, benali" disabled={editId?true:false}/></Field>
+              {!editId&&(
+                <>
+                  <Field label="UID Badge RFID" required><input className={`${inp} font-mono uppercase`} value={form.rfid_uid} onChange={e=>setForm(f=>({...f,rfid_uid:e.target.value.toUpperCase()}))} placeholder="3E487B89" maxLength={8}/></Field>
+                  <Field label="Mot de passe" required><input className={inp} type="password" value={form.password} onChange={e=>setForm(f=>({...f,password:e.target.value}))} placeholder="Minimum 4 caractères"/></Field>
+                  <Field label="Code PIN (4 chiffres)" required><input className={inp} type="password" maxLength={4} value={form.pin} onChange={e=>setForm(f=>({...f,pin:e.target.value.replace(/\D/g,'')}))} placeholder="••••"/></Field>
+                </>
+              )}
+              
+              {saveError && (
+                <p className="text-sm text-red-600 font-semibold mt-1">{saveError}</p>
+              )}
+              
+              {editId&&(
+                <div className={`border rounded-xl p-4 ${dark?'border-gray-700 bg-gray-900/40':'border-gray-200 bg-gray-50'}`}>
+                  <p className={`font-bold mb-3 ${dark?'text-white':'text-gray-900'}`}>Changer le mot de passe</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className={`block text-xs font-bold mb-1 ${dark?'text-gray-400':'text-gray-600'}`}>Ancien mot de passe</label>
+                      <input type="password" className={inp} value={pwdForm.old_password} onChange={e=>setPwdForm(f=>({...f,old_password:e.target.value}))} placeholder="••••••••"/>
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-bold mb-1 ${dark?'text-gray-400':'text-gray-600'}`}>Nouveau mot de passe</label>
+                      <input type="password" className={inp} value={pwdForm.new_password} onChange={e=>setPwdForm(f=>({...f,new_password:e.target.value}))} placeholder="••••••••"/>
+                    </div>
+                    <div>
+                      <label className={`block text-xs font-bold mb-1 ${dark?'text-gray-400':'text-gray-600'}`}>Confirmer le mot de passe</label>
+                      <input type="password" className={inp} value={pwdForm.confirm_password} onChange={e=>setPwdForm(f=>({...f,confirm_password:e.target.value}))} placeholder="••••••••"/>
+                    </div>
+                    {pwdForm.new_password && pwdForm.confirm_password && pwdForm.new_password !== pwdForm.confirm_password && (
+                      <p className="text-red-600 text-sm font-bold">Les mots de passe ne correspondent pas</p>
+                    )}
+                    {pwdError && <p className="text-sm text-red-600 font-semibold mt-1">{pwdError}</p>}
+                    {pwdSuccess && <p className="text-sm text-emerald-600 font-semibold mt-1">{pwdSuccess}</p>}
+                    <button onClick={updatePassword} disabled={pwdUpdating||!pwdForm.old_password||!pwdForm.new_password||!pwdForm.confirm_password||pwdForm.new_password!==pwdForm.confirm_password}
+                      className="w-full py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-200 text-white font-bold text-sm rounded-lg transition-colors">
+                      {pwdUpdating?'Mise à jour...':'Mettre à jour le mot de passe'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button onClick={save} disabled={saving||!form.name||!form.rfid_uid||!form.pin||(!editId&&!form.password)}
+                  className="flex-1 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-gray-200 text-white font-black rounded-xl transition-colors flex items-center justify-center gap-2">
+                  <Save className="w-4 h-4"/> {saving?'Enregistrement...':'Enregistrer'}
+                </button>
+                <button onClick={()=>setModal(false)} className={`px-5 py-3 border rounded-xl font-bold transition-colors ${dark?'border-gray-600 text-gray-300 hover:bg-gray-800':'border-gray-200 text-gray-600 hover:bg-gray-50'}`}>Annuler</button>
+              </div>
+            </div>
+          </Modal>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// TECH VIEW (engineer only — all technical details)
+// ══════════════════════════════════════════════════════════════════
+const TechView = ({ techStatus, onRefresh }: { techStatus:TechStatus|null; onRefresh:()=>void }) => {
+  const { dark } = useTheme();
+  const [log,setLog]=useState<LogEntry[]>([]);
+  const [fwVersion,setFwVersion]=useState('1.0.0');
+  const [fwFile,setFwFile]=useState('firmware.bin');
+  const [fwBusy,setFwBusy]=useState(false);
+  const [fwHist,setFwHist]=useState<Array<{id:number;version:string;filename:string}>>([]);
+  useEffect(()=>{ api('/api/log').then(setLog); },[]);
+  const loadFwHist=useCallback(()=>{ api('/api/tech/firmware-history').then(setFwHist).catch(()=>setFwHist([])); },[]);
+  useEffect(()=>{ loadFwHist(); },[loadFwHist]);
+  const registerFw=async()=>{
+    setFwBusy(true);
+    try {
+      await api('/api/tech/firmware',{method:'POST',body:JSON.stringify({version:fwVersion,filename:fwFile})});
+      await loadFwHist();
+    } catch(e:any){ alert(e.message||String(e)); }
+    finally { setFwBusy(false); }
+  };
+
+  const card=dark?'bg-gray-800 border-gray-700':'bg-white border-gray-200';
+  const dot=(v:string)=>v==='online'?'bg-emerald-500 animate-pulse':v==='unknown'?'bg-gray-400':'bg-red-500';
+  const label=(v:string)=>v==='online'?'text-emerald-500':v==='unknown'?'text-gray-400':'text-red-500';
+
+  return (
+    <div className="p-8 space-y-6 max-w-5xl">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className={`text-2xl font-black ${dark?'text-white':'text-gray-900'}`}>🔧 Vue Technique</h1>
+          <p className={`text-sm mt-0.5 ${dark?'text-gray-400':'text-gray-500'}`}>Réservé à l'ingénieur système — MediBot ROBOT001</p>
+        </div>
+        <button onClick={onRefresh} className={`flex items-center gap-2 border px-3 py-2 rounded-xl text-sm transition-all ${dark?'border-gray-700 text-gray-400 hover:text-teal-400':'border-gray-200 text-gray-500 hover:text-teal-600'}`}>
+          <RefreshCw className="w-3.5 h-3.5"/> Actualiser
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-6">
+        {/* MQTT Status */}
+        <div className={`${card} border rounded-2xl p-5`}>
+          <h2 className={`font-black mb-4 flex items-center gap-2 ${dark?'text-white':'text-gray-800'}`}><Wifi className="w-4 h-4 text-teal-500"/> Broker MQTT</h2>
+          <div className="space-y-3">
+            {[
+              {label:'Broker TCP :1883',val:techStatus?.mqtt_broker||'unknown'},
+              {label:'WebSocket :9001',val:techStatus?.mqtt_ws||'unknown'},
+              {label:'Robot ID',val:'ROBOT001',plain:true},
+              {label:'Topic CMD',val:'robot/ROBOT001/cmd/dispense',plain:true},
+            ].map(s=>(
+              <div key={s.label} className={`flex items-center justify-between p-3 rounded-xl border ${dark?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-100'}`}>
+                <span className={`text-sm font-semibold ${dark?'text-gray-300':'text-gray-600'}`}>{s.label}</span>
+                {s.plain
+                  ? <span className={`text-xs font-mono ${dark?'text-gray-400':'text-gray-500'}`}>{s.val}</span>
+                  : <div className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${dot(s.val)}`}/><span className={`text-sm font-bold capitalize ${label(s.val)}`}>{s.val}</span></div>
+                }
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Hardware */}
+        <div className={`${card} border rounded-2xl p-5`}>
+          <h2 className={`font-black mb-4 flex items-center gap-2 ${dark?'text-white':'text-gray-800'}`}><Cpu className="w-4 h-4 text-blue-500"/> Hardware</h2>
+          <div className="space-y-3">
+            {[
+              {label:'ESP32 (WiFi/MQTT)',val:techStatus?.esp32||'unknown'},
+              {label:'STM32F4 (RFID/Tiroirs)',val:techStatus?.stm32||'unknown'},
+              {label:'RC522 (SPI1)',val:'PA4/PA5/PA6/PA7',plain:true},
+              {label:'UART ESP32↔STM32',val:'PA9/PA10 · 115200',plain:true},
+            ].map(s=>(
+              <div key={s.label} className={`flex items-center justify-between p-3 rounded-xl border ${dark?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-100'}`}>
+                <span className={`text-sm font-semibold ${dark?'text-gray-300':'text-gray-600'}`}>{s.label}</span>
+                {s.plain
+                  ? <span className={`text-xs font-mono ${dark?'text-gray-400':'text-gray-500'}`}>{s.val}</span>
+                  : <div className="flex items-center gap-1.5"><span className={`w-2 h-2 rounded-full ${dot(s.val)}`}/><span className={`text-sm font-bold capitalize ${label(s.val)}`}>{s.val}</span></div>
+                }
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Drawers */}
+        <div className={`${card} border rounded-2xl p-5`}>
+          <h2 className={`font-black mb-4 flex items-center gap-2 ${dark?'text-white':'text-gray-800'}`}><Package className="w-4 h-4 text-violet-500"/> Tiroirs (6)</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {Array.from({length:6},(_,i)=>(
+              <div key={i} className={`p-3 rounded-xl border text-center ${dark?'bg-gray-700/50 border-gray-600':'bg-gray-50 border-gray-100'}`}>
+                <p className={`font-black text-lg ${dark?'text-white':'text-gray-800'}`}>[{i+1}]</p>
+                <p className={`text-xs font-mono ${dark?'text-gray-400':'text-gray-400'}`}>PB{[6,7,8,9,4,5][i]}</p>
+                <span className={`text-xs font-semibold ${dark?'text-emerald-400':'text-emerald-600'}`}>Prêt</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Last activity + config */}
+        <div className={`${card} border rounded-2xl p-5`}>
+          <h2 className={`font-black mb-4 flex items-center gap-2 ${dark?'text-white':'text-gray-800'}`}><Activity className="w-4 h-4 text-orange-500"/> Configuration</h2>
+          <div className="space-y-2">
+            {[
+              ['Host MQTT','127.0.0.1'],
+              ['Port TCP','1883'],
+              ['Port WebSocket','9001'],
+              ['UART Baud','115200'],
+              ['Protocole','JSON / newline'],
+              ['Dernière activité', techStatus?.last_activity||'—'],
+            ].map(([k,v])=>(
+              <div key={k} className="flex items-center justify-between text-sm">
+                <span className={dark?'text-gray-400':'text-gray-500'}>{k}</span>
+                <span className={`font-mono font-semibold ${dark?'text-gray-200':'text-gray-800'}`}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className={`${card} border rounded-2xl p-5`}>
+        <h2 className={`font-black mb-4 flex items-center gap-2 ${dark?'text-white':'text-gray-800'}`}><Cpu className="w-4 h-4 text-orange-500"/> OTA — métadonnées firmware</h2>
+        <p className={`text-sm mb-4 ${dark?'text-gray-400':'text-gray-500'}`}>Enregistre une version déployée (journal côté serveur). Le binaire réel est géré hors interface.</p>
+        <div className="grid grid-cols-2 gap-3 max-w-xl">
+          <input className={`border rounded-xl px-3 py-2 text-sm ${dark?'bg-gray-700 border-gray-600 text-white':'bg-white border-gray-200'}`} value={fwVersion} onChange={e=>setFwVersion(e.target.value)} placeholder="Version"/>
+          <input className={`border rounded-xl px-3 py-2 text-sm ${dark?'bg-gray-700 border-gray-600 text-white':'bg-white border-gray-200'}`} value={fwFile} onChange={e=>setFwFile(e.target.value)} placeholder="firmware.bin"/>
+        </div>
+        <button type="button" disabled={fwBusy||!fwVersion} onClick={registerFw} className="mt-3 px-4 py-2 rounded-xl bg-orange-600 text-white font-bold text-sm disabled:opacity-50">
+          {fwBusy?'…':'Enregistrer version'}
+        </button>
+        <ul className={`mt-4 text-xs font-mono space-y-1 ${dark?'text-gray-300':'text-gray-600'}`}>
+          {fwHist.length===0?<li>—</li>:fwHist.map(h=><li key={h.id}>{h.version} · {h.filename}</li>)}
+        </ul>
+      </div>
+
+      {/* Raw dispense log */}
+      <div className={`${card} border rounded-2xl p-5`}>
+        <h2 className={`font-black mb-4 flex items-center gap-2 ${dark?'text-white':'text-gray-800'}`}><FileText className="w-4 h-4 text-gray-500"/> Journal brut ({log.length} entrées)</h2>
+        <div className={`font-mono text-xs rounded-xl p-4 max-h-48 overflow-y-auto ${dark?'bg-gray-900 text-green-400':'bg-gray-900 text-green-400'}`}>
+          {log.length===0?<p className="text-gray-500">Aucune entrée</p>:log.slice().reverse().map(e=>(
+            <div key={e.id} className="mb-1">
+              <span className="text-gray-500">[{e.timestamp}]</span>{' '}
+              <span className="text-teal-400">DISPENSE</span>{' '}
+              drawer=<span className="text-yellow-400">{e.drawer}</span>{' '}
+              med=<span className="text-white">{e.med_name}</span>{' '}
+              mqtt=<span className={e.mqtt_sent?'text-emerald-400':'text-red-400'}>{e.mqtt_sent?'OK':'FAIL'}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// AUDIT LOG VIEW
+// ══════════════════════════════════════════════════════════════════
+const ACTION_LABELS: Record<string, string> = {
+  CREATE_PATIENT: "Nouveau patient",
+  EDIT_PATIENT: "Modif. patient",
+  DELETE_PATIENT: "Suppression patient",
+  CREATE_DOCTOR: "Nouveau médecin",
+  EDIT_DOCTOR: "Modif. médecin",
+  DELETE_DOCTOR: "Suppression médecin",
+  DISPENSE: "Distribution",
+  CREATE_STOCK: "Nouveau stock",
+  EDIT_STOCK: "Modif. stock",
+  DELETE_STOCK: "Suppression stock",
+  VALIDATE_PRESCRIPTION: "Validation ordonnance",
+  LOGIN: "Connexion",
+  DISCHARGE: "Sortie patient",
+  ADMINISTRATION_CONFIRMED: "Prise confirmée",
+};
+
+const AuditLogView = () => {
+  const { dark } = useTheme();
+  const inp = useInpClass();
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [busy, setBusy] = useState(true);
+  const [filterAction, setFilterAction] = useState<string>('');
+  const [searchActor, setSearchActor] = useState<string>('');
+  const card = dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+
+  const loadAudit = useCallback(async () => {
+    setBusy(true);
+    try {
+      const data = await api('/api/audit-log?days=30');
+      setEntries(data || []);
+    } catch (e) {
+      console.error('Failed to load audit log:', e);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAudit();
+    const interval = setInterval(loadAudit, 30000);
+    return () => clearInterval(interval);
+  }, [loadAudit]);
+
+  const filtered = entries.filter(e => {
+    if (filterAction && (e.action ?? '') !== filterAction) return false;
+    if (searchActor && !(e.actor ?? '').toLowerCase().includes(searchActor.toLowerCase())) return false;
+    return true;
+  });
+
+  const allActions = Array.from(new Set(entries.map(e => e.action).filter(Boolean))).sort();
+
+  const formatDate = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+             d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return iso;
+    }
+  };
+
+  const getRowBg = (action: string) => {
+    if (action === 'DISPENSE' || action === 'LOGIN') {
+      return dark ? 'bg-teal-900/20' : 'bg-teal-50';
+    }
+    if (action.includes('DELETE')) {
+      return dark ? 'bg-red-900/20' : 'bg-red-50';
+    }
+    return '';
+  };
+
+  return (
+    <div className="p-8 space-y-6 max-w-6xl">
+      <div>
+        <h1 className={`text-3xl font-black mb-1 ${dark ? 'text-white' : 'text-gray-900'}`}>
+          <Shield className="w-8 h-8 inline-block mr-3 text-teal-600"/> Journal d'audit
+        </h1>
+        <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{filtered.length} entrées sur les {entries.length} derniers jours</p>
+      </div>
+
+      <div className="flex gap-4 flex-wrap items-end">
+        <div className="flex-1 min-w-64">
+          <label className={`block text-sm font-bold mb-1.5 ${dark ? 'text-gray-300' : 'text-gray-700'}`}>Rechercher par acteur</label>
+          <input
+            type="text"
+            placeholder="Nom du docteur..."
+            value={searchActor}
+            onChange={e => setSearchActor(e.target.value)}
+            className={inp}
+          />
+        </div>
+        <div>
+          <label className={`block text-sm font-bold mb-1.5 ${dark ? 'text-gray-300' : 'text-gray-700'}`}>Filtrer par action</label>
+          <select
+            value={filterAction}
+            onChange={e => setFilterAction(e.target.value)}
+            className={`${inp} appearance-none cursor-pointer`}
+          >
+            <option value="">Toutes les actions</option>
+            {allActions.map(action => (
+              <option key={action} value={action}>
+                {ACTION_LABELS[action] || action}
+              </option>
+            ))}
+          </select>
+        </div>
+        {(filterAction || searchActor) && (
+          <button
+            onClick={() => {
+              setFilterAction('');
+              setSearchActor('');
+            }}
+            className="px-4 py-2.5 bg-gray-300 hover:bg-gray-400 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-bold rounded-lg transition-colors text-sm"
+          >
+            Effacer les filtres
+          </button>
+        )}
+      </div>
+
+      {busy ? (
+        <Spinner />
+      ) : filtered.length === 0 ? (
+        <div className={`text-center py-16 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
+          <Shield className="w-14 h-14 mx-auto mb-4 opacity-30" />
+          <p className="text-lg font-bold">Aucune activité enregistrée</p>
+        </div>
+      ) : (
+        <div className={`${card} border rounded-2xl overflow-hidden`}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={`border-b ${dark ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-200'}`}>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>Date / Heure</th>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>Acteur</th>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>Rôle</th>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>Action</th>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>Type</th>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>ID</th>
+                  <th className={`px-4 py-3 text-left font-bold ${dark ? 'text-gray-200' : 'text-gray-700'}`}>Détail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(entry => (
+                  <tr key={entry.id} className={`border-b ${dark ? 'border-gray-700' : 'border-gray-100'} ${getRowBg(entry.action)}`}>
+                    <td className={`px-4 py-3 ${dark ? 'text-gray-300' : 'text-gray-700'}`}>{formatDate(entry.timestamp ?? '')}</td>
+                    <td className={`px-4 py-3 font-semibold ${dark ? 'text-white' : 'text-gray-900'}`}>{entry.actor ?? '—'}</td>
+                    <td className={`px-4 py-3 text-xs ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{entry.actor_role ?? '—'}</td>
+                    <td className={`px-4 py-3 font-semibold text-teal-600`}>{ACTION_LABELS[entry.action ?? ''] || entry.action ?? '—'}</td>
+                    <td className={`px-4 py-3 text-xs ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{entry.target_type ?? '—'}</td>
+                    <td className={`px-4 py-3 font-mono text-xs ${dark ? 'text-gray-400' : 'text-gray-500'}`}>{entry.target_id ?? '—'}</td>
+                    <td className={`px-4 py-3 font-mono text-xs max-w-xs truncate ${dark ? 'text-gray-500' : 'text-gray-400'}`}>{entry.detail ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// ADMIN SHELL
+// ══════════════════════════════════════════════════════════════════
+const AdminShell = ({ onSwitchToKiosk, currentDoctor, onLogout }: { onSwitchToKiosk:()=>void; currentDoctor: Doctor | null; onLogout:()=>void }) => {
+  const { dark } = useTheme();
+  const [view,setView]=useState<AdminView>('dashboard');
+  const [techStatus,setTechStatus]=useState<TechStatus|null>(null);
+
+  const loadTech=useCallback(async()=>{ try { setTechStatus(await api('/api/tech/status')); } catch{} },[]);
+  useEffect(()=>{ loadTech(); const t=setInterval(loadTech,15000); return ()=>clearInterval(t); },[loadTech]);
+
+  const allNav = [
+    { id: 'dashboard' as AdminView, label: 'Tableau de bord', icon: LayoutDashboard },
+    { id: 'rooms' as AdminView, label: 'Salles', icon: DoorOpen },
+    { id: 'patients' as AdminView, label: 'Patients', icon: Users },
+    { id: 'pharmacy' as AdminView, label: 'Pharmacie', icon: FlaskConical },
+    { id: 'validation' as AdminView, label: 'Validation ordonnances', icon: ClipboardCheck },
+    { id: 'interactions' as AdminView, label: 'Interactions', icon: Shield },
+    { id: 'analytics' as AdminView, label: 'Analytique', icon: BarChart3 },
+    { id: 'shift' as AdminView, label: 'Rapport relève', icon: FileText },
+    { id: 'doctors' as AdminView, label: 'Équipe médicale', icon: Stethoscope },
+    { id: 'audit' as AdminView, label: "Journal d'audit", icon: Shield },
+    { id: 'engineer' as AdminView, label: 'Statut ingénieur', icon: Cpu },
+  ];
+
+  const nav = allNav.filter(item => {
+    const allowed = PAGE_ACCESS[item.id as keyof typeof PAGE_ACCESS] || [];
+    return currentDoctor && allowed.includes(currentDoctor.role);
+  });
+
+  const sb=dark?'bg-gray-900 border-gray-800':'bg-white border-gray-200';
+  const navActive=dark?'bg-gray-800 text-white border border-gray-700':'bg-teal-50 text-teal-700 border border-teal-100';
+  const navInactive=dark?'text-gray-400 hover:text-white hover:bg-gray-800':'text-gray-500 hover:text-gray-900 hover:bg-gray-50';
+  const main=dark?'bg-gray-900':'bg-gray-50';
+
+  return (
+    <div className={`flex h-screen overflow-hidden ${dark?'bg-gray-900':'bg-gray-100'}`}>
+      <aside className={`w-60 flex-shrink-0 border-r ${sb} flex flex-col shadow-sm`}>
+        {/* Logo */}
+        <div className={`flex items-center gap-3 px-5 py-5 border-b ${dark?'border-gray-800':'border-gray-100'}`}>
+          <div className="w-9 h-9 bg-teal-600 rounded-xl flex items-center justify-center shadow-sm">
+            <Bot className="w-5 h-5 text-white"/>
+          </div>
+          <div>
+            <p className={`font-black text-base leading-none ${dark?'text-white':'text-gray-900'}`}>MediBot</p>
+            <p className="text-teal-500 text-xs font-semibold">Administration</p>
+          </div>
+          <div className="ml-auto"><ThemeToggle/></div>
+        </div>
+
+        {/* Doctor info */}
+        {currentDoctor && (
+          <div className={`px-4 py-3 border-b ${dark?'border-gray-800 bg-gray-800/50':'border-gray-100 bg-gray-50'}`}>
+            <p className={`text-xs font-bold ${dark?'text-gray-400':'text-gray-500'}`}>Connecté en tant que</p>
+            <p className={`font-bold text-sm mt-1 ${dark?'text-white':'text-gray-900'}`}>{currentDoctor.name}</p>
+            <p className="text-xs text-gray-500 mt-0.5">@{currentDoctor.username}</p>
+            <button
+              onClick={onLogout}
+              className={`w-full flex items-center justify-center gap-2 mt-3 py-2 rounded-lg border text-xs font-bold transition-all ${dark?'border-gray-600 text-red-400 hover:bg-red-900/20':'border-red-200 text-red-600 hover:bg-red-50'}`}
+            >
+              <LogOut className="w-3.5 h-3.5"/> Déconnexion
+            </button>
+          </div>
+        )}
+
+        {/* Nav — doctor pages */}
+        <nav className="flex-1 px-3 py-4 space-y-1">
+          {nav.map(item=>(
+            <button key={item.id} onClick={()=>setView(item.id)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left font-semibold text-sm
+                ${view===item.id?navActive:navInactive}`}>
+              <item.icon className={`w-4 h-4 ${view===item.id?'text-teal-600':''}`}/>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Bottom: system status + engineer + kiosk */}
+        <div className={`px-4 py-4 border-t ${dark?'border-gray-800':'border-gray-100'} space-y-2`}>
+          <SystemStatusPill techStatus={techStatus}/>
+          <button onClick={()=>setView('tech')}
+            className={`w-full flex items-center gap-2 py-2 px-3 rounded-xl border text-xs font-bold transition-all
+              ${view==='tech'
+                ? dark?'bg-orange-900/50 border-orange-700 text-orange-300':'bg-orange-50 border-orange-200 text-orange-700'
+                : dark?'border-gray-700 text-gray-500 hover:text-orange-400 hover:border-orange-700':'border-gray-200 text-gray-400 hover:text-orange-600 hover:border-orange-200'}`}>
+            <Wrench className="w-3.5 h-3.5"/> Vue Technique (Ingénieur)
+          </button>
+          <button onClick={onSwitchToKiosk}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white transition-colors text-xs font-black">
+            <Bot className="w-3.5 h-3.5"/> Mode Kiosk
+          </button>
+        </div>
+      </aside>
+
+      <main className={`flex-1 min-h-0 overflow-hidden flex flex-col ${main}`}>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={view}
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className={view === 'engineer' ? 'flex-1 min-h-0 flex flex-col' : 'h-full overflow-auto'}
+          >
+            {view === 'dashboard' && <DashboardView techStatus={techStatus} />}
+            {view === 'rooms' && <RoomsView />}
+            {view === 'patients' && <PatientsView />}
+            {view === 'pharmacy' && <PharmacyView />}
+            {view === 'validation' && <PharmacistValidationView dark={dark} />}
+            {view === 'interactions' && <DrugInteractionsAdminView dark={dark} />}
+            {view === 'analytics' && <AnalyticsDashboardView dark={dark} />}
+            {view === 'shift' && <ShiftReportView dark={dark} />}
+            {view === 'doctors' && <DoctorsView />}
+            {view === 'audit' && <AuditLogView />}
+            {view === 'tech' && <TechView techStatus={techStatus} onRefresh={loadTech} />}
+            {view === 'engineer' && <EngineerView onAdminNav={(id) => setView(id as AdminView)} />}
+          </motion.div>
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+};
+
+// ══════════════════════════════════════════════════════════════════
+// ROOT APP
+// ══════════════════════════════════════════════════════════════════
+export default function App() {
+  const [mode,setMode]=useState<AppMode>('kiosk');
+  const [currentDoctor,setCurrentDoctor]=useState<Doctor|null>(null);
+
+  return (
+    <ThemeProvider>
+      <AnimatePresence mode="wait">
+        {!currentDoctor && mode==='admin'?(
+          <motion.div key="login" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+            <LoginView onLoginSuccess={(doc)=>{ setCurrentDoctor(doc); }}/>
+          </motion.div>
+        ):mode==='kiosk'?(
+          <motion.div key="kiosk" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}>
+            <KioskView onSwitchToAdmin={()=>setMode('admin')}/>
+          </motion.div>
+        ):(
+          <motion.div key="admin" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} className="h-screen">
+            <AdminShell onSwitchToKiosk={()=>setMode('kiosk')} currentDoctor={currentDoctor} onLogout={()=>setCurrentDoctor(null)}/>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </ThemeProvider>
+  );
+}

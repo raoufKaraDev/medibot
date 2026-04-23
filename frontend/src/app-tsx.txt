@@ -1,0 +1,978 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Bot, 
+  Heart, 
+  Stethoscope, 
+  Star, 
+  LogOut, 
+  Clock, 
+  User, 
+  ChevronRight, 
+  ArrowLeft, 
+  Bed, 
+  Folder, 
+  Settings, 
+  LayoutDashboard, 
+  DoorOpen, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Pill, 
+  Plus, 
+  RefreshCw, 
+  ExternalLink,
+  Phone,
+  UserPlus,
+  Volume2,
+  ShieldCheck,
+  Lock
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { connectMQTT, disconnectMQTT } from './mqtt';
+// --- Mock Data ---
+
+const DOCTOR = {
+  uid: '3E487B89',
+  pin: '1234',
+  name: 'Dr. KARA Abderraouf',
+  role: 'Médecin Chef Pédiatrie'
+};
+
+const MEDICATIONS = [
+  { id: 1, name: 'Amoxicilline', dosage: '500mg', schedule: 'Matin', drawer: 1, time: '08:00' },
+  { id: 2, name: 'Paracétamol Sirop', dosage: '7.5ml', schedule: 'Toutes les 6h', drawer: 2, time: '12:00' },
+  { id: 3, name: 'Ventoline', dosage: '2 bouffées', schedule: 'Si besoin', drawer: 3, time: '06:45' },
+  { id: 4, name: 'Vitamine D', dosage: '1 dose', schedule: 'Matin', drawer: 4, time: '09:00' },
+  { id: 5, name: 'Sérum Phy', dosage: 'Lavage nasal', schedule: '3x/jour', drawer: 5, time: '14:00' },
+  { id: 6, name: 'Gaviscon', dosage: 'Après repas', schedule: 'Soir', drawer: 6, time: '20:00' }
+];
+
+const ALLERGIES = {
+  PENICILLINE: 'Pénicilline',
+  ARACHIDES: 'Arachides'
+};
+
+const ROOMS = Array.from({ length: 10 }, (_, i) => ({
+  id: i + 1,
+  name: `Salle ${String(i + 1).padStart(2, '0')}`,
+  type: 'Pédiatrie',
+  capacity: 2,
+  occupied: i === 9 ? 1 : 2,
+  hasAlert: [0, 2, 5].includes(i)
+}));
+
+const PATIENTS = [
+  { id: 1, roomId: 1, name: 'Yanis Belkacem', age: 6, weight: '21kg', blood: 'A+', diagnostic: 'Pneumonie', guardian: 'M. Ahmed Belkacem (Père)', phone: '+213 550 12 34 56', allergies: [] },
+  { id: 2, roomId: 1, name: 'Sami Haddad', age: 5, weight: '19kg', blood: 'O-', diagnostic: 'Bronchiolite', guardian: 'Mme. Leila Haddad (Mère)', phone: '+213 551 22 33 44', allergies: [ALLERGIES.ARACHIDES] },
+  { id: 3, roomId: 2, name: 'Lina Mansouri', age: 4, weight: '16kg', blood: 'B+', diagnostic: 'Gastro-entérite', guardian: 'Mme. Sofia Mansouri (Mère)', phone: '+213 661 98 76 54', allergies: [ALLERGIES.PENICILLINE, ALLERGIES.ARACHIDES] },
+  { id: 4, roomId: 2, name: 'Ines Haddad', age: 3, weight: '14kg', blood: 'A-', diagnostic: 'Suivi Chirurgical', guardian: 'Mme. Leila Haddad (Grand-mère)', phone: '+213 552 00 11 22', allergies: [] },
+  { id: 5, roomId: 3, name: 'Amine Zerrouki', age: 8, weight: '28kg', blood: 'AB+', diagnostic: 'Fracture Tibia', guardian: 'M. Karim Zerrouki (Père)', phone: '+213 770 44 33 22', allergies: [] },
+  { id: 6, roomId: 3, name: 'Sarah Benali', age: 7, weight: '24kg', blood: 'O+', diagnostic: 'Observation', guardian: 'Mme. Benali', phone: '+213 555 11 22 33', allergies: [] },
+  { id: 7, roomId: 4, name: 'Amine Mansouri', age: 6, weight: '22.5kg', blood: 'O+', diagnostic: 'Pneumonie infectieuse aiguë', guardian: 'Karim Mansouri (Père)', phone: '0550 12 34 56', allergies: [ALLERGIES.PENICILLINE, ALLERGIES.ARACHIDES] },
+  { id: 8, roomId: 4, name: 'Yasmine Kaci', age: 5, weight: '18kg', blood: 'A+', diagnostic: 'Angine', guardian: 'M. Kaci', phone: '+213 555 44 55 66', allergies: [] },
+];
+
+// Fill remaining patients for rooms 5-9 (2 each) and room 10 (1)
+const remainingPatients = [
+  { id: 9, roomId: 5, name: 'Mehdi Brahimi', age: 9, weight: '30kg', blood: 'B-' },
+  { id: 10, roomId: 5, name: 'Nour El Houda', age: 4, weight: '15kg', blood: 'O+' },
+  { id: 11, roomId: 6, name: 'Omar Farouk', age: 10, weight: '35kg', blood: 'A-' },
+  { id: 12, roomId: 6, name: 'Kenza Toumi', age: 6, weight: '20kg', blood: 'AB-' },
+  { id: 13, roomId: 7, name: 'Rayan Slimani', age: 5, weight: '19kg', blood: 'O+' },
+  { id: 14, roomId: 7, name: 'Maya Abed', age: 3, weight: '14kg', blood: 'B+' },
+  { id: 15, roomId: 8, name: 'Zaki Larbi', age: 7, weight: '23kg', blood: 'A+' },
+  { id: 16, roomId: 8, name: 'Lila Cheniti', age: 8, weight: '26kg', blood: 'O-' },
+  { id: 17, roomId: 9, name: 'Anis Gherbi', age: 4, weight: '17kg', blood: 'AB+' },
+  { id: 18, roomId: 9, name: 'Sonia Merad', age: 6, weight: '21kg', blood: 'A-' },
+  { id: 19, roomId: 10, name: 'Walid Sadi', age: 9, weight: '32kg', blood: 'O+' },
+];
+
+remainingPatients.forEach(p => {
+  PATIENTS.push({
+    ...p,
+    diagnostic: 'Observation post-opératoire',
+    guardian: 'Parent',
+    phone: '+213 000 00 00 00',
+    allergies: []
+  });
+});
+
+// --- Components ---
+
+  // System Status State
+const [systemStatus, setSystemStatus] = useState({
+  mqtt: 'offline',
+  esp32: 'unknown',
+  stm32: 'unknown'
+  });
+
+  // Login/RFID States
+const [pendingUid, setPendingUid] = useState("");
+const [loginError, setLoginError] = useState("");
+const Header = ({ doctor, onLogout }) => {
+  const [time, setTime] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  // Existing timer (KEEP THIS)
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // MQTT Connection + Real RFID Listener
+  useEffect(() => {
+    connectMQTT(
+      (status) => {
+        setSystemStatus(status);
+      },
+      async (uid) => {
+        console.log("Real RFID scanned:", uid);
+        
+        try {
+          const res = await fetch('/api/rfid', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid })
+          });
+          const data = await res.json();
+          
+          if (data.access) {
+            // ✅ Using YOUR exact variable names from App.tsx
+
+            
+            setDoctor({ name: data.name, role: data.role });
+            setShowPin(true);  // Show the PIN overlay
+            setView('pin');    // Switch to PIN view if needed
+          } else {
+            console.warn("Badge non reconnu:", uid);
+          }
+        } catch (err) {
+          console.error("RFID error:", err);
+        }
+      }
+    );
+
+    return () => disconnectMQTT();
+  }, []);
+
+
+
+
+  
+
+  const formatDate = (date: Date) => {
+    const options: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long' };
+    return date.toLocaleDateString('fr-FR', options);
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  return (
+    <header className="fixed top-0 z-50 w-full bg-surface/80 backdrop-blur-md px-6 py-4 border-b border-slate-200">
+      <div className="flex justify-between items-center w-full max-w-[1440px] mx-auto">
+        <div className="flex items-center gap-2 text-primary font-black text-xl font-headline tracking-tight">
+          <Bot className="w-8 h-8" />
+          MediBot — Hôpital de Rouiba
+        </div>
+        
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <p className="font-headline font-bold text-primary capitalize">{formatDate(time)}</p>
+            <p className="text-secondary font-medium text-sm">{formatTime(time)}</p>
+          </div>
+          
+          <div className="flex items-center gap-3 pl-6 border-l border-slate-200">
+            {doctor && (
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-bold text-primary">{doctor.name}</p>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">{doctor.role}</p>
+              </div>
+            )}
+            <div className="w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center text-secondary overflow-hidden border-2 border-primary-container">
+              {doctor ? (
+                <img 
+                  src={`https://picsum.photos/seed/doc1/40/40`} 
+                  alt="Doctor" 
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <User className="w-6 h-6" />
+              )}
+            </div>
+            {doctor && (
+              <button onClick={onLogout} className="text-slate-500 hover:text-error transition-colors">
+                <LogOut className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+};
+
+const Sidebar = ({ currentView, setView, onEmergency }) => {
+  const navItems = [
+    { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
+    { id: 'rooms', label: 'Salles', icon: DoorOpen },
+    { id: 'patients', label: 'Dossiers Patients', icon: Folder },
+    { id: 'settings', label: 'Paramètres', icon: Settings },
+  ];
+
+  return (
+    <aside className="bg-surface-container-low/70 backdrop-blur-xl h-screen w-72 rounded-r-[3rem] sticky top-0 z-40 hidden lg:flex flex-col py-10 gap-2 shadow-[40px_0_60px_-15px_rgba(0,0,0,0.04)]">
+      <div className="px-8 mb-10">
+        <h1 className="text-primary font-black text-2xl font-headline">MediBot</h1>
+        <p className="text-slate-500 text-xs font-semibold uppercase tracking-widest">Hôpital de Rouiba</p>
+      </div>
+      
+      <nav className="flex flex-col gap-1">
+        {navItems.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => setView(item.id)}
+            className={`mx-4 py-3 px-6 rounded-full transition-all flex items-center gap-4 font-headline text-sm font-semibold ${
+              currentView === item.id 
+                ? 'bg-white text-primary shadow-sm translate-x-1' 
+                : 'text-slate-500 hover:bg-white/50'
+            }`}
+          >
+            <item.icon className="w-5 h-5" />
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      
+      <div className="mt-auto px-8">
+        <button 
+          onClick={onEmergency}
+          className="w-full bg-error text-white py-4 rounded-full font-bold flex items-center justify-center gap-2 shadow-lg shadow-error/20 active:scale-95 transition-transform"
+        >
+          <AlertTriangle className="w-5 h-5" />
+          Urgence
+        </button>
+      </div>
+    </aside>
+  );
+};
+
+const Footer = () => (
+  <footer className="fixed bottom-0 w-full px-8 py-4 bg-surface/80 backdrop-blur-md border-t border-slate-200 flex justify-between items-center z-30">
+    <p className="text-[10px] font-medium uppercase tracking-[0.2em] text-slate-400">
+      © 2024 Hôpital de Rouiba — MediBot Système
+    </p>
+    <div className="flex gap-8">
+      <div className="flex items-center gap-2">
+        <div className="w-2 h-2 bg-primary rounded-full animate-pulse"></div>
+        <span className="text-xs font-medium uppercase tracking-widest text-slate-400">Système connecté</span>
+      </div>
+      <button className="text-xs font-medium uppercase tracking-widest text-slate-400 hover:underline decoration-primary-container">
+        Support Technique
+      </button>
+    </div>
+  </footer>
+);
+
+// --- Main App Component ---
+
+export default function App() {
+  const [view, setView] = useState('home');
+  const [doctor, setDoctor] = useState(null);
+  const [showPin, setShowPin] = useState(false);
+  const [pin, setPin] = useState(['', '', '', '']);
+  const [pinError, setPinError] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState(null);
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [showDispenseModal, setShowDispenseModal] = useState(false);
+  const [selectedMed, setSelectedMed] = useState(null);
+  const [dispensedCount, setDispensedCount] = useState(0);
+  const [observations, setObservations] = useState({});
+  const [currentObservation, setCurrentObservation] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+
+  const pinRefs = [useRef(null), useRef(null), useRef(null), useRef(null)];
+
+  // --- Handlers ---
+
+  const handlePinChange = (index, value) => {
+    if (value.length > 1) return;
+    const newPin = [...pin];
+    newPin[index] = value;
+    setPin(newPin);
+    setPinError(false);
+
+    if (value && index < 3) {
+      pinRefs[index + 1].current.focus();
+    }
+  };
+
+  const handlePinSubmit = () => {
+    const enteredPin = pin.join('');
+    if (enteredPin === DOCTOR.pin) {
+      setDoctor(DOCTOR);
+      setShowPin(false);
+      setView('dashboard');
+      setPin(['', '', '', '']);
+    } else {
+      setPinError(true);
+      setPin(['', '', '', '']);
+      pinRefs[0].current.focus();
+    }
+  };
+
+  const handleLogout = () => {
+    setDoctor(null);
+    setView('home');
+    setSelectedRoom(null);
+    setSelectedPatient(null);
+  };
+
+  const handleDispense = (med) => {
+    setSelectedMed(med);
+    setShowDispenseModal(true);
+  };
+
+  const confirmDispense = async () => {
+    if (!selectedMed) return;
+    
+    try {
+      // 1. Send the real request to your FastAPI backend
+      const response = await fetch('/api/dispense', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          drawer: selectedMed.drawer,
+          patient: selectedPatient?.name || "Inconnu",
+          med: selectedMed.name || "Inconnu"
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // 2. Only update UI if the backend confirms it sent the MQTT message
+        setDispensedCount(prev => prev + 1);
+        setShowDispenseModal(false);
+        setToastMsg(`Tiroir [${selectedMed.drawer}] ouvert avec succès`);
+        setShowToast(true);
+        setTimeout(() => setShowToast(false), 3000);
+        
+        // Mark as dispensed in local state if you have that logic
+        // setDispensedMeds(prev => new Set(prev).add(selectedMed.id));
+      } else {
+        alert("Erreur de communication avec le robot");
+      }
+    } catch (error) {
+      console.error("Failed to send dispense command:", error);
+      alert("Erreur réseau: impossible de contacter le serveur");
+    }
+  };
+
+  const saveObservation = () => {
+    if (!selectedPatient) return;
+    setObservations(prev => ({
+      ...prev,
+      [selectedPatient.id]: currentObservation
+    }));
+    setCurrentObservation('');
+    setToastMsg('Observation enregistrée');
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  // --- Views ---
+
+  const renderHome = () => (
+    <motion.div 
+      initial={{ opacity: 0 }} 
+      animate={{ opacity: 1 }} 
+      exit={{ opacity: 0 }}
+      className="flex-grow flex flex-col items-center justify-center relative"
+    >
+      <div className="absolute top-1/4 left-1/4 animate-float-1 opacity-40 text-tertiary">
+        <Heart className="w-12 h-12 fill-current" />
+      </div>
+      <div className="absolute bottom-1/4 right-1/4 animate-float-2 opacity-30 text-secondary">
+        <Stethoscope className="w-10 h-10" />
+      </div>
+      <div className="absolute top-1/3 right-1/3 animate-float-1 opacity-20 text-primary">
+        <Star className="w-16 h-16 fill-current" />
+      </div>
+
+      <div className="relative z-10 flex flex-col items-center gap-8">
+        <div className="animate-breathing relative mascot-container group cursor-pointer">
+          <div className="absolute -inset-8 bg-primary/10 rounded-full blur-3xl"></div>
+          <div className="relative w-60 h-60 bg-white rounded-full border-4 border-primary flex items-center justify-center shadow-xl">
+            <Bot className="w-32 h-32 text-primary" />
+            <div className="absolute top-4 right-4 bg-tertiary/10 p-2 rounded-full animate-heartbeat">
+              <Plus className="w-6 h-6 text-tertiary" />
+            </div>
+          </div>
+        </div>
+
+        <div className="text-center">
+          <h1 className="font-headline text-7xl font-black text-primary tracking-tighter mb-2">MediBot</h1>
+          <p className="font-headline text-xl font-semibold text-secondary opacity-80">Service Pédiatrie — Hôpital de Rouiba, Alger</p>
+        </div>
+
+        <div className="mt-4 bg-glass p-8 rounded-xl shadow-lg text-center max-w-md">
+          <p className="text-slate-600 font-medium leading-relaxed">
+            Veuillez scanner votre badge RFID pour accéder au système de gestion des patients et des salles.
+          </p>
+        </div>
+
+        <button 
+          onClick={() => setShowPin(true)}
+          className="mt-8 bg-surface-container-high text-slate-600 px-6 py-3 rounded-full text-xs font-bold hover:bg-primary-container hover:text-primary transition-all uppercase tracking-widest"
+        >
+          Simuler Badge RFID
+        </button>
+      </div>
+    </motion.div>
+  );
+
+  const renderDashboard = () => (
+    <motion.div 
+      initial={{ x: 100, opacity: 0 }} 
+      animate={{ x: 0, opacity: 1 }}
+      className="flex-grow pt-28 pb-16 px-10"
+    >
+      <header className="mb-10 flex justify-between items-end">
+        <div>
+          <h1 className="text-4xl font-extrabold text-primary font-headline tracking-tight mb-2">Bonjour, {doctor?.name.split(' ')[1]}</h1>
+          <p className="text-slate-500 font-medium">Voici l'état actuel de votre service de pédiatrie aujourd'hui.</p>
+        </div>
+        <div className="flex gap-2">
+          <button className="p-3 bg-white rounded-full text-slate-400 hover:text-primary transition-colors shadow-sm">
+            <RefreshCw className="w-5 h-5" />
+          </button>
+          <button className="flex items-center gap-2 px-6 py-3 bg-primary-container text-on-primary-container font-bold rounded-full shadow-sm hover:scale-95 transition-transform">
+            <UserPlus className="w-5 h-5" />
+            Nouveau Patient
+          </button>
+        </div>
+      </header>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+        {[
+          { label: 'Total Patients', val: 19, icon: User, color: 'primary' },
+          { label: 'Salles Actives', val: 10, icon: DoorOpen, color: 'secondary' },
+          { label: 'Médicaments distribués', val: dispensedCount, icon: Pill, color: 'slate' },
+          { label: 'Alertes allergies', val: 3, icon: AlertTriangle, color: 'error' },
+        ].map((kpi, i) => (
+          <div key={i} className={`bg-white rounded-xl p-6 shadow-sm border-b-4 border-${kpi.color} relative overflow-hidden group`}>
+            <div className="flex flex-col gap-4">
+              <div className={`h-12 w-12 rounded-2xl bg-${kpi.color}/10 flex items-center justify-center text-${kpi.color}`}>
+                <kpi.icon className="w-6 h-6" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">{kpi.label}</p>
+                <h3 className="text-4xl font-black text-slate-800 font-headline">{kpi.val}</h3>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <section>
+        <div className="flex items-center justify-between mb-8">
+          <h2 className="text-2xl font-bold text-primary font-headline flex items-center gap-2">
+            <LayoutDashboard className="w-6 h-6" />
+            Surveillance des Salles
+          </h2>
+          <div className="flex gap-4">
+            <span className="flex items-center gap-2 text-xs font-bold text-slate-400">
+              <div className="w-3 h-3 rounded-full bg-primary"></div> Occupé
+            </span>
+            <span className="flex items-center gap-2 text-xs font-bold text-slate-400">
+              <div className="w-3 h-3 rounded-full bg-slate-200"></div> Libre
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-6">
+          {ROOMS.map((room) => (
+            <button 
+              key={room.id}
+              onClick={() => { setSelectedRoom(room); setView('room'); }}
+              className="bg-white rounded-xl p-6 text-left shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all relative group border-2 border-transparent hover:border-primary/20"
+            >
+              {room.hasAlert && (
+                <div className="absolute top-4 right-4 bg-error-container text-white p-1 rounded-full animate-pulse">
+                  <AlertTriangle className="w-3 h-3" />
+                </div>
+              )}
+              <p className="text-slate-400 font-bold text-xs uppercase mb-1">{room.type}</p>
+              <h4 className="text-3xl font-black text-primary font-headline mb-4">{room.name}</h4>
+              <div className="flex flex-col gap-4">
+                <div className="flex gap-2">
+                  {Array.from({ length: room.capacity }).map((_, i) => (
+                    <Bed key={i} className={`w-5 h-5 ${i < room.occupied ? 'text-primary fill-current' : 'text-slate-200'}`} />
+                  ))}
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-500">{room.occupied} Patient{room.occupied > 1 ? 's' : ''}</span>
+                  {room.hasAlert && <span className="text-xs font-black text-error">ALERTE</span>}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+    </motion.div>
+  );
+
+  const renderRoom = () => {
+    const roomPatients = PATIENTS.filter(p => p.roomId === selectedRoom?.id);
+    return (
+      <motion.div 
+        initial={{ x: 100, opacity: 0 }} 
+        animate={{ x: 0, opacity: 1 }}
+        className="flex-grow pt-28 pb-16 px-10"
+      >
+        <nav className="flex items-center gap-4 mb-8">
+          <button 
+            onClick={() => setView('dashboard')}
+            className="p-3 bg-white text-primary rounded-full shadow-sm hover:shadow-md transition-shadow"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex items-center gap-2 text-sm font-medium text-slate-500">
+            <span className="hover:text-primary cursor-pointer" onClick={() => setView('dashboard')}>Accueil</span>
+            <ChevronRight className="w-4 h-4" />
+            <span className="text-primary font-bold">{selectedRoom?.name} - {selectedRoom?.type} A</span>
+          </div>
+        </nav>
+
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+          <div>
+            <h2 className="text-4xl font-headline font-extrabold text-slate-900 tracking-tight mb-2">Patients Actuels</h2>
+            <p className="text-slate-500 font-medium">Gestion des lits et dossiers en temps réel pour la {selectedRoom?.name}.</p>
+          </div>
+          <div className="bg-secondary-container text-on-secondary-container px-6 py-3 rounded-full flex items-center gap-2 font-bold text-sm">
+            <Bed className="w-5 h-5" />
+            {selectedRoom?.occupied}/{selectedRoom?.capacity} Lits Occupés
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+          {roomPatients.map((patient) => (
+            <div key={patient.id} className="bg-white rounded-xl overflow-hidden relative group hover:shadow-xl transition-all duration-500 border border-slate-100">
+              {patient.allergies.length > 0 && (
+                <div className="bg-error-container text-white px-8 py-2.5 flex items-center gap-3 text-xs font-bold uppercase tracking-widest">
+                  <AlertTriangle className="w-4 h-4 fill-current" />
+                  Allergie: {patient.allergies.join(', ')}
+                </div>
+              )}
+              <div className="p-8">
+                <div className="flex justify-between items-start mb-6">
+                  <div className="flex items-center gap-5">
+                    <img 
+                      src={`https://picsum.photos/seed/kid${patient.id}/80/80`} 
+                      alt={patient.name} 
+                      className="w-20 h-20 rounded-lg object-cover ring-4 ring-surface-container-low"
+                    />
+                    <div>
+                      <h3 className="text-xl font-headline font-bold text-slate-900">{patient.name}</h3>
+                      <p className="text-slate-500 font-medium">{patient.age} ans • <span className="text-primary font-bold">Lit 0{patient.id % 2 === 0 ? 2 : 1}</span></p>
+                    </div>
+                  </div>
+                  <span className="bg-primary-container text-on-primary-container px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider">{patient.diagnostic}</span>
+                </div>
+                
+                <div className="bg-surface-container-low rounded-lg p-5 mb-6 flex items-start gap-4">
+                  <User className="w-5 h-5 text-secondary" />
+                  <div className="text-sm">
+                    <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest mb-1">Accompagnateur</p>
+                    <p className="text-slate-800 font-semibold">{patient.guardian}</p>
+                    <p className="text-slate-500">Tél: {patient.phone}</p>
+                  </div>
+                </div>
+                
+                <div className="flex justify-end">
+                  <button 
+                    onClick={() => { setSelectedPatient(patient); setView('patient'); }}
+                    className="bg-primary text-white px-8 py-3 rounded-full font-bold flex items-center gap-2 hover:bg-primary-dim transition-colors"
+                  >
+                    Voir le Dossier Complet
+                    <ExternalLink className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+          
+          {selectedRoom?.occupied < selectedRoom?.capacity && (
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-12 flex flex-col items-center justify-center text-slate-400 hover:border-primary-container hover:bg-primary-container/10 transition-colors cursor-pointer group">
+              <UserPlus className="w-10 h-10 mb-4 group-hover:scale-110 transition-transform" />
+              <p className="font-bold text-lg">Admettre un nouveau patient</p>
+              <p className="text-sm">Lit disponible</p>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
+  const renderPatient = () => (
+    <motion.div 
+      initial={{ x: 100, opacity: 0 }} 
+      animate={{ x: 0, opacity: 1 }}
+      className="flex-grow pt-28 pb-32 px-10"
+    >
+      <nav className="flex items-center justify-between mb-8">
+        <div className="flex items-center gap-3 text-sm font-medium text-slate-400">
+          <span className="hover:text-primary cursor-pointer" onClick={() => setView('dashboard')}>Accueil</span>
+          <ChevronRight className="w-4 h-4" />
+          <span className="hover:text-primary cursor-pointer" onClick={() => setView('room')}>{selectedRoom?.name}</span>
+          <ChevronRight className="w-4 h-4" />
+          <span className="text-slate-900 font-bold">{selectedPatient?.name}</span>
+        </div>
+        <button 
+          onClick={() => setView('room')}
+          className="flex items-center gap-2 py-2.5 px-5 bg-white text-secondary font-bold rounded-full border border-slate-200 shadow-sm hover:bg-slate-50 transition-all"
+        >
+          <ArrowLeft className="w-5 h-5" />
+          Retour
+        </button>
+      </nav>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <aside className="lg:col-span-4 space-y-8">
+          <div className="bg-white rounded-xl p-8 shadow-sm relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-primary-container/20 rounded-full blur-3xl"></div>
+            <div className="relative flex flex-col items-center text-center">
+              <div className="relative mb-6">
+                <img 
+                  src={`https://picsum.photos/seed/kid${selectedPatient?.id}/128/128`} 
+                  alt={selectedPatient?.name} 
+                  className="w-32 h-32 rounded-xl object-cover border-4 border-white shadow-lg"
+                />
+                <div className="absolute -bottom-2 -right-2 bg-primary text-white p-2 rounded-full shadow-md">
+                  <Settings className="w-4 h-4" />
+                </div>
+              </div>
+              <h1 className="text-2xl font-black text-slate-900 mb-1">{selectedPatient?.name}</h1>
+              <span className="px-4 py-1 bg-secondary-container text-on-secondary-container rounded-full text-xs font-bold uppercase tracking-wider mb-6">Patient ID: #ROU-{8800 + selectedPatient?.id}</span>
+              
+              <div className="grid grid-cols-2 gap-4 w-full mb-8">
+                {[
+                  { label: 'Date de Naissance', val: '12 Mai 2018' },
+                  { label: 'Âge', val: `${selectedPatient?.age} ans` },
+                  { label: 'Poids', val: selectedPatient?.weight },
+                  { label: 'Groupe Sanguin', val: selectedPatient?.blood, color: 'text-error' }
+                ].map((stat, i) => (
+                  <div key={i} className="bg-surface-container-low p-4 rounded-lg text-left">
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{stat.label}</p>
+                    <p className={`text-sm font-bold ${stat.color || 'text-slate-900'}`}>{stat.val}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="w-full text-left mb-8">
+                <h3 className="text-xs font-black text-slate-400 uppercase mb-3 flex items-center gap-2">
+                  <Stethoscope className="w-4 h-4" />
+                  Diagnostic
+                </h3>
+                <div className="bg-primary/5 border border-primary/10 p-4 rounded-lg">
+                  <p className="text-primary font-bold">{selectedPatient?.diagnostic}</p>
+                </div>
+              </div>
+
+              <div className="w-full text-left">
+                <h3 className="text-xs font-black text-slate-400 uppercase mb-3 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4" />
+                  Allergies
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {selectedPatient?.allergies.length > 0 ? (
+                    selectedPatient.allergies.map((a, i) => (
+                      <span key={i} className="px-3 py-1 bg-error/10 text-error rounded-full text-xs font-bold border border-error/20">{a}</span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-slate-400 italic">Aucune allergie connue</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-secondary-container/30 rounded-xl p-6 border border-secondary-container/50">
+            <h3 className="text-xs font-black text-secondary uppercase mb-4 flex items-center gap-2">
+              <User className="w-4 h-4" />
+              Accompagnateur
+            </h3>
+            <div className="flex items-center gap-4">
+              <img 
+                src={`https://picsum.photos/seed/guardian${selectedPatient?.id}/56/56`} 
+                alt="Guardian" 
+                className="w-14 h-14 rounded-full border-2 border-white shadow-sm"
+              />
+              <div className="flex-1">
+                <p className="font-bold text-slate-900">{selectedPatient?.guardian}</p>
+                <p className="text-xs text-slate-500 font-medium">{selectedPatient?.phone}</p>
+              </div>
+              <div className="bg-green-500/10 text-green-600 px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1">
+                <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                Présent
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section className="lg:col-span-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-black text-secondary flex items-center gap-3">
+              <Pill className="w-8 h-8 text-primary" />
+              Médicaments Prescrits
+            </h2>
+            <div className="bg-surface-container p-1 rounded-full flex gap-1">
+              <button className="bg-white px-4 py-1.5 rounded-full text-xs font-bold shadow-sm">Aujourd'hui</button>
+              <button className="px-4 py-1.5 rounded-full text-xs font-bold text-slate-400 hover:text-secondary">Demain</button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            {MEDICATIONS.map((med) => (
+              <div key={med.id} className="bg-white p-6 rounded-xl shadow-sm border border-transparent hover:border-primary/20 transition-all group flex flex-col justify-between h-full">
+                <div>
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="w-10 h-10 bg-primary-container text-primary font-black rounded-lg flex items-center justify-center text-lg">{med.id}</div>
+                    <span className="px-2.5 py-1 bg-surface-container text-slate-400 rounded-full text-[10px] font-bold uppercase">En attente</span>
+                  </div>
+                  <h4 className="text-lg font-bold text-slate-900 mb-1">{med.name}</h4>
+                  <p className="text-xs text-slate-500 font-medium mb-4">Posologie: {med.dosage} • {med.schedule}</p>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-secondary">
+                    <Clock className="w-4 h-4" />
+                    Prochaine dose: {med.time}
+                  </div>
+                  <button 
+                    onClick={() => handleDispense(med)}
+                    className="w-full py-3 bg-primary text-white font-bold rounded-full text-sm hover:shadow-lg hover:shadow-primary/20 active:scale-95 transition-all"
+                  >
+                    Distribuer
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {observations[selectedPatient?.id] && (
+            <div className="mt-8 bg-white p-6 rounded-xl shadow-sm border border-primary/10">
+              <h3 className="text-xs font-black text-slate-400 uppercase mb-3">Dernière Observation</h3>
+              <p className="text-sm italic text-slate-600">{observations[selectedPatient.id]}</p>
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="fixed inset-x-0 bottom-0 bg-white shadow-2xl border-t border-slate-200 p-6 z-50">
+        <div className="max-w-[1440px] mx-auto flex flex-col md:flex-row items-end gap-6">
+          <div className="flex-1 w-full">
+            <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Ajouter une observation (optionnel)</label>
+            <textarea 
+              value={currentObservation}
+              onChange={(e) => setCurrentObservation(e.target.value)}
+              className="w-full rounded-lg bg-surface-container-low border-none focus:ring-2 focus:ring-primary/20 text-sm p-4 h-20 resize-none" 
+              placeholder="Notes sur l'administration ou état du patient..."
+            ></textarea>
+          </div>
+          <button 
+            onClick={saveObservation}
+            className="w-full md:w-auto px-10 py-4 bg-secondary text-white font-bold rounded-full hover:shadow-xl hover:shadow-secondary/20 active:scale-95 transition-all"
+          >
+            Enregistrer l'administration
+          </button>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <Header doctor={doctor} onLogout={handleLogout} />
+      
+      <div className="flex flex-grow">
+        {doctor && (
+          <Sidebar 
+            currentView={view} 
+            setView={setView} 
+            onEmergency={() => alert('Appel d\'urgence activé !')} 
+          />
+        )}
+        
+        <main className="flex-grow flex flex-col">
+          <AnimatePresence mode="wait">
+            {view === 'home' && renderHome()}
+            {view === 'dashboard' && renderDashboard()}
+            {view === 'room' && renderRoom()}
+            {view === 'patient' && renderPatient()}
+          </AnimatePresence>
+        </main>
+      </div>
+
+      <Footer />
+
+      {/* --- Overlays & Modals --- */}
+
+      {/* PIN Overlay */}
+      <AnimatePresence>
+        {showPin && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }} 
+              animate={{ scale: 1, y: 0 }}
+              className={`bg-white w-full max-w-md rounded-xl p-10 shadow-2xl flex flex-col items-center gap-8 relative overflow-hidden ${pinError ? 'animate-shake' : ''}`}
+            >
+              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-primary to-primary-container"></div>
+              <div className="flex flex-col items-center gap-4">
+                <div className="relative">
+                  <img 
+                    src={`https://picsum.photos/seed/doc1/128/128`} 
+                    alt="Dr. KARA" 
+                    className="w-32 h-32 rounded-full object-cover ring-8 ring-primary-container/30"
+                  />
+                  <div className="absolute bottom-0 right-0 bg-primary text-white p-2 rounded-full shadow-lg">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="text-center">
+                  <h2 className="text-2xl font-headline font-extrabold text-primary">Dr. KARA</h2>
+                  <p className="text-secondary font-medium uppercase tracking-widest text-xs">Pédiatre Référent</p>
+                </div>
+              </div>
+
+              <div className="w-full flex flex-col gap-6">
+                <p className="text-center text-sm font-medium text-slate-500">Saisissez votre code PIN</p>
+                <div className="flex justify-center gap-4">
+                  {pin.map((digit, i) => (
+                    <input
+                      key={i}
+                      ref={pinRefs[i]}
+                      type="password"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handlePinChange(i, e.target.value)}
+                      className="w-14 h-18 text-center text-3xl font-black bg-surface-container-low border-none rounded-lg focus:ring-4 focus:ring-primary-container text-primary transition-all"
+                    />
+                  ))}
+                </div>
+                {pinError && <p className="text-error text-center text-xs font-bold">Code PIN incorrect. Réessayez.</p>}
+                <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={handlePinSubmit}
+                    className="w-full py-4 bg-gradient-to-br from-primary to-primary-dim text-white rounded-full font-headline font-bold text-lg shadow-lg hover:shadow-primary-container/40 active:scale-95 transition-all"
+                  >
+                    Valider l'accès
+                  </button>
+                  <button 
+                    onClick={() => { setShowPin(false); setPin(['', '', '', '']); setPinError(false); }}
+                    className="w-full py-3 text-slate-500 font-semibold text-sm hover:text-error transition-colors"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Dispense Modal */}
+      <AnimatePresence>
+        {showDispenseModal && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-secondary/60 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9 }} 
+              animate={{ scale: 1 }}
+              className="bg-white w-full max-w-md rounded-xl p-8 shadow-2xl"
+            >
+              <div className="text-center mb-8">
+                <div className="w-20 h-20 bg-primary-container/30 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Pill className="w-10 h-10" />
+                </div>
+                <h2 className="text-2xl font-black text-slate-900 mb-2">Confirmer la distribution</h2>
+                <p className="text-sm text-slate-500 font-medium">Vous êtes sur le point d'ouvrir le tiroir n°{selectedMed?.drawer}.</p>
+              </div>
+
+              <div className="space-y-4 mb-8">
+                {[
+                  { label: 'Patient', val: selectedPatient?.name },
+                  { label: 'Médicament', val: selectedMed?.name },
+                  { label: 'Dosage', val: selectedMed?.dosage }
+                ].map((item, i) => (
+                  <div key={i} className="flex justify-between items-center py-2 border-b border-slate-100">
+                    <span className="text-xs text-slate-400 font-bold uppercase">{item.label}</span>
+                    <span className="text-sm font-bold text-slate-900">{item.val}</span>
+                  </div>
+                ))}
+
+                {selectedPatient?.allergies.some(a => selectedMed?.name.toLowerCase().includes(a.toLowerCase().substring(0, 4))) && (
+                  <div className="bg-error/10 p-4 rounded-lg flex gap-3 border border-error/20">
+                    <AlertTriangle className="w-5 h-5 text-error" />
+                    <div>
+                      <p className="text-xs font-black text-error uppercase">Attention Allergie</p>
+                      <p className="text-xs text-error font-medium">Le patient est allergique à une famille proche de ce médicament.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <button 
+                  onClick={() => setShowDispenseModal(false)}
+                  className="py-3 px-6 rounded-full border border-slate-200 text-slate-500 font-bold hover:bg-slate-50 transition-all"
+                >
+                  Annuler
+                </button>
+                <button 
+                  onClick={confirmDispense}
+                  className="py-3 px-6 rounded-full bg-primary text-white font-bold hover:shadow-lg hover:shadow-primary/20 transition-all"
+                >
+                  Confirmer
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {showToast && (
+          <motion.div 
+            initial={{ y: 100, opacity: 0 }} 
+            animate={{ y: 0, opacity: 1 }} 
+            exit={{ y: 100, opacity: 0 }}
+            className="fixed bottom-10 right-10 bg-primary text-white px-8 py-4 rounded-full shadow-2xl flex items-center gap-4 z-[200]"
+          >
+            <CheckCircle2 className="w-6 h-6" />
+            <div className="font-bold">{toastMsg}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

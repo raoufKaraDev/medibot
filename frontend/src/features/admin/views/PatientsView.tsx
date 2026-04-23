@@ -1,0 +1,1 @@
+export { PatientsView } from '../AdminShell';

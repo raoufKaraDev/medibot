@@ -1,0 +1,1 @@
+"""MediBot FastAPI application package."""
