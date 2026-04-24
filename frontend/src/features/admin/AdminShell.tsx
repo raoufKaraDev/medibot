@@ -4,7 +4,7 @@ import {
   AlertTriangle, RefreshCw, Package, X, Cpu, Wifi,
   Plus, Trash2, Edit2, Save, Stethoscope, BadgeCheck, Search,
   Bed, Sun, Moon, FlaskConical, Wrench, Camera, FileText,
-  BarChart3, Shield, ClipboardCheck, LogOut, Terminal, Power,
+  BarChart3, Shield, ShieldAlert, ClipboardCheck, LogOut, Terminal, Power,
   Download, Pause, Play, Key, Lock, ChevronDown,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -225,6 +225,17 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [signupOpen, setSignupOpen] = useState(false);
+  const [signupBusy, setSignupBusy] = useState(false);
+  const [signupMsg, setSignupMsg] = useState('');
+  const [signupForm, setSignupForm] = useState({
+    fullname: '',
+    username: '',
+    password: '',
+    role: 'MEDECIN_RESIDENT',
+    phone: '',
+    note: '',
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,7 +319,96 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
             {loading ? '…' : 'Se connecter'}
           </button>
         </form>
+
+        <div className="mt-5 pt-5 border-t border-gray-200/60 dark:border-gray-700/60">
+          <button
+            type="button"
+            onClick={() => { setSignupMsg(''); setSignupOpen(true); }}
+            className={`w-full py-3 rounded-xl border text-sm font-black transition-colors ${
+              dark
+                ? 'border-gray-700 text-gray-300 hover:bg-gray-700'
+                : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            Demander un compte (inscription)
+          </button>
+          <p className={`text-[11px] mt-2 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
+            La création du compte est validée par le Chef de Service (attribution RFID + PIN).
+          </p>
+        </div>
       </motion.div>
+
+      {signupOpen && (
+        <Modal title="Demande de création de compte" onClose={() => setSignupOpen(false)} width="max-w-2xl">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Nom complet" required>
+              <input className={inp} value={signupForm.fullname} onChange={(e) => setSignupForm({ ...signupForm, fullname: e.target.value })} />
+            </Field>
+            <Field label="Username (login)" required>
+              <input className={`${inp} font-mono`} value={signupForm.username} onChange={(e) => setSignupForm({ ...signupForm, username: e.target.value })} />
+            </Field>
+            <Field label="Mot de passe" required>
+              <input className={`${inp} font-mono`} type="password" value={signupForm.password} onChange={(e) => setSignupForm({ ...signupForm, password: e.target.value })} />
+            </Field>
+            <Field label="Rôle souhaité">
+              <select className={inp} value={signupForm.role} onChange={(e) => setSignupForm({ ...signupForm, role: e.target.value })}>
+                {ROLES.map((r) => (
+                  <option key={r.slug} value={r.slug}>{r.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Téléphone (optionnel)">
+              <input className={inp} value={signupForm.phone} onChange={(e) => setSignupForm({ ...signupForm, phone: e.target.value })} />
+            </Field>
+            <Field label="Note (optionnel)">
+              <input className={inp} value={signupForm.note} onChange={(e) => setSignupForm({ ...signupForm, note: e.target.value })} />
+            </Field>
+          </div>
+
+          {signupMsg && (
+            <div className={`mt-4 p-3 rounded-xl border text-sm font-bold ${
+              signupMsg.startsWith('OK:')
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300'
+                : 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300'
+            }`}>
+              {signupMsg.replace(/^OK:/,'')}
+            </div>
+          )}
+
+          <div className="flex gap-3 mt-6">
+            <button
+              disabled={signupBusy || !signupForm.fullname.trim() || !signupForm.username.trim() || !signupForm.password.trim()}
+              onClick={() => void (async () => {
+                setSignupMsg('');
+                setSignupBusy(true);
+                try {
+                  await api('/api/auth/register', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      fullname: signupForm.fullname,
+                      username: signupForm.username,
+                      password: signupForm.password,
+                      role: signupForm.role,
+                      phone: signupForm.phone || undefined,
+                      note: signupForm.note || undefined,
+                    }),
+                  });
+                  setSignupMsg('OK:Demande envoyée. Attendez la validation du Chef de Service.');
+                  setSignupForm({ fullname: '', username: '', password: '', role: 'MEDECIN_RESIDENT', phone: '', note: '' });
+                } catch (e: any) {
+                  setSignupMsg(String(e?.message || 'Erreur inscription'));
+                } finally {
+                  setSignupBusy(false);
+                }
+              })()}
+              className="flex-1 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black"
+            >
+              {signupBusy ? '...' : 'Envoyer la demande'}
+            </button>
+            <button onClick={() => setSignupOpen(false)} className={`px-5 py-3 border rounded-xl font-bold ${inp}`}>Fermer</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };
@@ -1944,143 +2044,490 @@ export const PatientsView = ({
 // PENDING REQUESTS VIEW (Staff Registration Approvals)
 // ══════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════
-// DOCTORS VIEW (Single Doctor Account Management)
+// ÉQUIPE MÉDICALE (Account + role + access management)
 // ══════════════════════════════════════════════════════════════════
+type StaffDoctor = {
+  id: number;
+  name: string;
+  username?: string;
+  rfid_uid?: string;
+  role: string;
+  status?: string;
+  created_at?: string;
+  last_activity?: string | null;
+  phone?: string | null;
+};
+
 const DoctorsView = ({ currentDoctor }: { currentDoctor?: any }) => {
   const { dark } = useTheme();
   const inp = useInpClass();
+  const card = dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+
+  const sanitizeRfid = (value: string) =>
+    (value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+
+  const [rows, setRows] = useState<StaffDoctor[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const sanitizeRfid = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
-  const [form, setForm] = useState({
-    fullname: currentDoctor?.name || 'Dr. KARA Abderraouf',
-    role: currentDoctor?.role || 'Médecin Chef Pédiatrie',
-    rfiduid: sanitizeRfid(currentDoctor?.rfiduid || ''),
-    pin: ''
+  const [tab, setTab] = useState<'staff' | 'requests'>('staff');
+
+  const [q, setQ] = useState('');
+  const [roleFilter, setRoleFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  const [editOpen, setEditOpen] = useState<StaffDoctor | null>(null);
+  // Signup flow: pending requests
+  const [pending, setPending] = useState<any[]>([]);
+  const [pendingCount, setPendingCount] = useState<number>(0);
+  const [approveOpen, setApproveOpen] = useState<any | null>(null);
+  const [approveForm, setApproveForm] = useState({ role: 'MEDECIN_RESIDENT', rfiduid: '', pin: '' });
+  const [rejectBusyId, setRejectBusyId] = useState<number | null>(null);
+
+  const [editForm, setEditForm] = useState({
+    fullname: '',
+    role: '',
+    rfiduid: '',
+    status: '',
+    phone: '',
+    pin: '',
   });
 
-  const handleUpdate = async () => {
+
+  const load = useCallback(async () => {
+    setBusy(true);
     setError('');
-    setSuccess('');
-    if (!form.fullname.trim()) return setError('Le nom est requis');
-    
+    try {
+      const list = await api('/api/admin/doctors');
+      setRows(Array.isArray(list) ? list : []);
+      const [cnt, reqs] = await Promise.all([
+        api('/api/admin/pending-count').catch(() => ({ count: 0 })),
+        api('/api/admin/pending-requests').catch(() => []),
+      ]);
+      setPendingCount(Number((cnt as any)?.count || 0));
+      setPending(Array.isArray(reqs) ? reqs : []);
+    } catch (e: any) {
+      setError(e?.message || 'Erreur chargement équipe médicale');
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return rows.filter((d) => {
+      const matchText =
+        !s ||
+        (d.name || '').toLowerCase().includes(s) ||
+        (d.username || '').toLowerCase().includes(s) ||
+        (d.rfid_uid || '').toLowerCase().includes(s);
+
+      const matchRole = roleFilter === 'ALL' ? true : String(d.role || '').toUpperCase() === roleFilter;
+      const matchStatus =
+        statusFilter === 'ALL' ? true : String(d.status || '').toUpperCase() === statusFilter;
+
+      return matchText && matchRole && matchStatus;
+    });
+  }, [rows, q, roleFilter, statusFilter]);
+
+  const toast = (msg: string) => {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), 3000);
+  };
+
+  const openEdit = (d: StaffDoctor) => {
+    setError('');
+    setEditOpen(d);
+    setEditForm({
+      fullname: d.name || '',
+      role: d.role || 'MEDECIN_RESIDENT',
+      rfiduid: d.rfid_uid || '',
+      status: (d.status || 'ACTIVE').toUpperCase(),
+      phone: String(d.phone || ''),
+      pin: '',
+    });
+  };
+
+  const onEditSave = async () => {
+    if (!editOpen) return;
+    setError('');
     setBusy(true);
     try {
-      await api(`/api/admin/doctors/${currentDoctor?.id || 1}`, {
+      await api(`/api/admin/doctors/${editOpen.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          fullname: form.fullname,
-          role: form.role,
-          rfiduid: form.rfiduid,
-          pin: form.pin || undefined
-        })
+          fullname: editForm.fullname || undefined,
+          role: editForm.role || undefined,
+          rfiduid: editForm.rfiduid ? sanitizeRfid(editForm.rfiduid) : undefined,
+          status: editForm.status || undefined,
+          phone: editForm.phone || undefined,
+          pin: editForm.pin || undefined,
+        }),
       });
-      setSuccess('Compte mis à jour avec succès');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err: any) {
-      setError(err.message || 'Erreur lors de la mise à jour');
+      setEditOpen(null);
+      toast('Compte mis à jour');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Erreur mise à jour');
     } finally {
       setBusy(false);
     }
   };
 
-  const card = dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+  const onSuspendReactivate = async (d: StaffDoctor, next: 'ACTIVE' | 'SUSPENDED') => {
+    setError('');
+    setBusy(true);
+    try {
+      await api(`/api/admin/doctors/${d.id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: next }),
+      });
+      toast(next === 'SUSPENDED' ? 'Compte suspendu' : 'Compte réactivé');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Erreur statut');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+
+  const onDelete = async (d: StaffDoctor) => {
+    if (!window.confirm(`Supprimer définitivement ${d.name} ?\n\n⚠️ Recommandé uniquement si le compte n’a jamais été utilisé.`)) return;
+    setError('');
+    setBusy(true);
+    try {
+      await api(`/api/doctors/${d.id}`, { method: 'DELETE' });
+      toast('Compte supprimé');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Suppression refusée');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onApprove = async () => {
+    if (!approveOpen) return;
+    setError('');
+    if (!approveForm.rfiduid.trim()) return setError('RFID requis');
+    if (!approveForm.pin.trim()) return setError('PIN requis');
+    setBusy(true);
+    try {
+      await api(`/api/admin/approve/${approveOpen.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          role: approveForm.role,
+          rfiduid: sanitizeRfid(approveForm.rfiduid),
+          pin: approveForm.pin,
+          validatedby: currentDoctor?.name || 'CHEF_SERVICE',
+        }),
+      });
+      setApproveOpen(null);
+      setApproveForm({ role: 'MEDECIN_RESIDENT', rfiduid: '', pin: '' });
+      toast('Demande approuvée');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Erreur validation');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onReject = async (requestId: number) => {
+    setError('');
+    setRejectBusyId(requestId);
+    try {
+      await api(`/api/admin/reject/${requestId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ reason: 'rejected' }),
+      });
+      toast('Demande rejetée');
+      await load();
+    } catch (e: any) {
+      setError(e?.message || 'Erreur rejet');
+    } finally {
+      setRejectBusyId(null);
+    }
+  };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center gap-3 mb-2">
-        <div className={`p-3 rounded-2xl ${dark ? 'bg-teal-900/30 text-teal-400' : 'bg-teal-50 text-teal-600'}`}>
-          <Stethoscope className="w-8 h-8" />
-        </div>
-        <div>
-          <h1 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>Gestion du Compte</h1>
-          <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Informations du médecin référent</p>
-        </div>
-      </div>
-
-      <div className={`rounded-3xl border p-8 shadow-sm ${card}`}>
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-6">
-            <Field label="Nom complet">
-              <input 
-                className={inp} 
-                value={form.fullname} 
-                onChange={e => setForm({...form, fullname: e.target.value})}
-                placeholder="Dr. Nom Prénom"
-              />
-            </Field>
-
-            <Field label="Spécialité / Rôle">
-              <input 
-                className={inp} 
-                value={form.role} 
-                onChange={e => setForm({...form, role: e.target.value})}
-                placeholder="Ex: Médecin Chef Pédiatrie"
-              />
-            </Field>
-
-            <div className="grid grid-cols-2 gap-4">
-              <Field label="Badge RFID (UID)">
-                <input 
-                  className={`${inp} font-mono`} 
-                  value={form.rfiduid} 
-                  onChange={e => setForm({...form, rfiduid: sanitizeRfid(e.target.value)})}
-                  placeholder="A1B2C3D4"
-                  maxLength={8}
-                />
-              </Field>
-              <Field label="Nouveau Code PIN">
-                <input 
-                  className={inp} 
-                  type="password"
-                  value={form.pin} 
-                  onChange={e => setForm({...form, pin: e.target.value})}
-                  placeholder="••••"
-                  maxLength={4}
-                />
-              </Field>
-            </div>
+    <div className="p-8 space-y-6 max-w-6xl">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-3 rounded-2xl ${dark ? 'bg-teal-900/30 text-teal-400' : 'bg-teal-50 text-teal-600'}`}>
+            <Stethoscope className="w-7 h-7" />
           </div>
-
-          {(error || success) && (
-            <motion.div 
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              className={`p-4 rounded-2xl text-sm font-bold border ${
-                error 
-                  ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400' 
-                  : 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400'
-              }`}
-            >
-              {error || success}
-            </motion.div>
-          )}
-
+          <div>
+            <h1 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>Équipe Médicale</h1>
+            <p className={`text-sm ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Gestion des comptes, rôles et accès</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
           <button
-            onClick={handleUpdate}
-            disabled={busy}
-            className={`w-full py-4 rounded-2xl font-black text-white transition-all shadow-lg ${
-              busy ? 'bg-gray-400 cursor-not-allowed' : 'bg-teal-600 hover:bg-teal-700 active:scale-[0.98] shadow-teal-600/20'
+            onClick={() => setTab('staff')}
+            className={`px-4 py-2 rounded-xl text-sm font-black border ${
+              tab === 'staff'
+                ? 'bg-teal-600 border-teal-600 text-white'
+                : dark ? 'border-gray-700 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'
             }`}
           >
-            {busy ? 'Mise à jour...' : 'Enregistrer les modifications'}
+            Équipe ({rows.length})
+          </button>
+          <button
+            onClick={() => setTab('requests')}
+            className={`px-4 py-2 rounded-xl text-sm font-black border ${
+              tab === 'requests'
+                ? 'bg-teal-600 border-teal-600 text-white'
+                : dark ? 'border-gray-700 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+            }`}
+            disabled={!currentDoctor || String(currentDoctor.role).toUpperCase() !== 'CHEF_SERVICE'}
+            title={!currentDoctor || String(currentDoctor.role).toUpperCase() !== 'CHEF_SERVICE' ? 'Chef de Service requis' : 'Demandes en attente'}
+          >
+            Demandes ({pendingCount})
           </button>
         </div>
       </div>
 
-      <div className={`p-6 rounded-3xl border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-900/30`}>
-        <div className="flex gap-3">
-          <ShieldAlert className="w-6 h-6 text-amber-600 flex-shrink-0" />
-          <div>
-            <p className="text-sm font-bold text-amber-800 dark:text-amber-400">Sécurité du système</p>
-            <p className="text-xs text-amber-700/80 dark:text-amber-500/80 mt-1">
-              Ce compte est l'unique identifiant autorisé pour la prescription et la validation. 
-              Gardez votre badge RFID et votre code PIN en lieu sûr.
-            </p>
+      {(error || success) && (
+        <div className={`p-4 rounded-2xl text-sm font-bold border ${
+          error
+            ? 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
+            : 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-400'
+        }`}>
+          {error || success}
+        </div>
+      )}
+
+      <div className={`${card} border rounded-2xl p-4`}>
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="flex-1 min-w-[220px]">
+            <label className={`block text-xs font-bold mb-1 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>Recherche</label>
+            <input className={inp} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nom, username, RFID..." />
           </div>
+          <div className="min-w-[200px]">
+            <label className={`block text-xs font-bold mb-1 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>Rôle</label>
+            <select className={inp} value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
+              <option value="ALL">Tous</option>
+              {ROLES.map((r) => (
+                <option key={r.slug} value={r.slug}>{r.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="min-w-[170px]">
+            <label className={`block text-xs font-bold mb-1 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>Statut</label>
+            <select className={inp} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="ALL">Tous</option>
+              <option value="ACTIVE">Actif</option>
+              <option value="SUSPENDED">Suspendu</option>
+            </select>
+          </div>
+          <button
+            onClick={() => void load()}
+            className={`px-4 py-2 rounded-xl border font-black text-sm ${dark ? 'border-gray-700 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+            disabled={busy}
+          >
+            <RefreshCw className="w-4 h-4 inline-block mr-2" />
+            Actualiser
+          </button>
         </div>
       </div>
+
+      {tab === 'staff' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {busy && rows.length === 0 ? (
+            <div className={`${card} border rounded-2xl`}><Spinner /></div>
+          ) : filtered.length === 0 ? (
+            <div className={`${card} border rounded-2xl p-8 text-center font-semibold ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+              Aucun compte trouvé
+            </div>
+          ) : (
+            filtered.map((d) => {
+              const st = String(d.status || 'ACTIVE').toUpperCase();
+              const initials = (d.name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+              return (
+                <div key={d.id} className={`${card} border rounded-2xl p-5`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-black ${dark ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                        {initials}
+                      </div>
+                      <div>
+                        <p className={`font-black ${dark ? 'text-white' : 'text-gray-900'}`}>{d.name}</p>
+                        <p className={`text-xs font-mono ${dark ? 'text-gray-400' : 'text-gray-500'}`}>@{d.username || '—'}</p>
+                      </div>
+                    </div>
+                    <Badge text={st === 'ACTIVE' ? 'Actif' : 'Suspendu'} color={st === 'ACTIVE' ? 'green' : 'red'} />
+                  </div>
+
+                  <div className="mt-4 space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className={dark ? 'text-gray-400' : 'text-gray-500'}>Rôle</span>
+                      <span className={`font-bold ${dark ? 'text-gray-200' : 'text-gray-800'}`}>{d.role}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className={dark ? 'text-gray-400' : 'text-gray-500'}>RFID</span>
+                      <span className={`font-mono font-bold ${dark ? 'text-gray-200' : 'text-gray-800'}`}>{d.rfid_uid || '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className={dark ? 'text-gray-400' : 'text-gray-500'}>Créé</span>
+                      <span className={`font-mono ${dark ? 'text-gray-300' : 'text-gray-700'}`}>{d.created_at || '—'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className={dark ? 'text-gray-400' : 'text-gray-500'}>Dernière activité</span>
+                      <span className={`font-mono ${dark ? 'text-gray-300' : 'text-gray-700'}`}>{d.last_activity || '—'}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button className={`px-3 py-2 rounded-xl border text-xs font-black ${dark ? 'border-gray-700 text-gray-300 hover:bg-gray-700' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`} onClick={() => openEdit(d)}>
+                      <Edit2 className="w-3.5 h-3.5 inline-block mr-1" />
+                      Modifier
+                    </button>
+                    {st === 'ACTIVE' ? (
+                      <button className="px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-black" onClick={() => void onSuspendReactivate(d, 'SUSPENDED')}>
+                        Suspendre
+                      </button>
+                    ) : (
+                      <button className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black" onClick={() => void onSuspendReactivate(d, 'ACTIVE')}>
+                        Réactiver
+                      </button>
+                    )}
+                    <button className="px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black" onClick={() => void onDelete(d)}>
+                      <Trash2 className="w-3.5 h-3.5 inline-block mr-1" />
+                      Supprimer
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {pending.length === 0 ? (
+            <div className={`${card} border rounded-2xl p-8 text-center font-semibold ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+              Aucune demande en attente
+            </div>
+          ) : (
+            pending.map((r) => (
+              <div key={r.id} className={`${card} border rounded-2xl p-5`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className={`font-black ${dark ? 'text-white' : 'text-gray-900'}`}>{r.fullname}</p>
+                    <p className={`text-xs font-mono ${dark ? 'text-gray-400' : 'text-gray-500'}`}>@{r.username}</p>
+                  </div>
+                  <Badge text="PENDING" color="amber" />
+                </div>
+                <div className="mt-3 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className={dark ? 'text-gray-400' : 'text-gray-500'}>Rôle souhaité</span>
+                    <span className={`font-bold ${dark ? 'text-gray-200' : 'text-gray-800'}`}>{r.role}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={dark ? 'text-gray-400' : 'text-gray-500'}>Téléphone</span>
+                    <span className={`font-mono ${dark ? 'text-gray-300' : 'text-gray-700'}`}>{r.phone || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={dark ? 'text-gray-400' : 'text-gray-500'}>Créée</span>
+                    <span className={`font-mono ${dark ? 'text-gray-300' : 'text-gray-700'}`}>{r.createdat || '—'}</span>
+                  </div>
+                  {r.note ? (
+                    <div className={`text-xs ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
+                      <span className="font-bold">Note:</span> {r.note}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    className="px-3 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-black"
+                    onClick={() => { setApproveOpen(r); setApproveForm({ role: r.role || 'MEDECIN_RESIDENT', rfiduid: '', pin: '' }); }}
+                  >
+                    Approuver
+                  </button>
+                  <button
+                    className={`px-3 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black disabled:opacity-50`}
+                    disabled={rejectBusyId === r.id}
+                    onClick={() => void onReject(r.id)}
+                  >
+                    Rejeter
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editOpen && (
+        <Modal title={`Modifier — ${editOpen.name}`} onClose={() => setEditOpen(null)} width="max-w-2xl">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Nom complet">
+              <input className={inp} value={editForm.fullname} onChange={(e) => setEditForm({ ...editForm, fullname: e.target.value })} />
+            </Field>
+            <Field label="Rôle">
+              <select className={inp} value={editForm.role} onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}>
+                {ROLES.map((r) => (
+                  <option key={r.slug} value={r.slug}>{r.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Statut">
+              <select className={inp} value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+                <option value="ACTIVE">Actif</option>
+                <option value="SUSPENDED">Suspendu</option>
+              </select>
+            </Field>
+            <Field label="RFID">
+              <input className={`${inp} font-mono`} value={editForm.rfiduid} onChange={(e) => setEditForm({ ...editForm, rfiduid: sanitizeRfid(e.target.value) })} maxLength={8} />
+            </Field>
+            <Field label="Téléphone">
+              <input className={inp} value={editForm.phone} onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })} />
+            </Field>
+            <Field label="Changer PIN (optionnel)">
+              <input className={`${inp} font-mono`} type="password" value={editForm.pin} onChange={(e) => setEditForm({ ...editForm, pin: e.target.value.replace(/[^0-9]/g, '').slice(0, 8) })} />
+            </Field>
+          </div>
+          <div className="flex gap-3 mt-6">
+            <button disabled={busy} onClick={() => void onEditSave()} className="flex-1 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black">
+              {busy ? '...' : 'Enregistrer'}
+            </button>
+            <button onClick={() => setEditOpen(null)} className={`px-5 py-3 border rounded-xl font-bold ${inp}`}>Annuler</button>
+          </div>
+        </Modal>
+      )}
+
+      {approveOpen && (
+        <Modal title={`Valider — ${approveOpen.fullname}`} onClose={() => setApproveOpen(null)} width="max-w-2xl">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Rôle" required>
+              <select className={inp} value={approveForm.role} onChange={(e) => setApproveForm({ ...approveForm, role: e.target.value })}>
+                {ROLES.map((r) => (
+                  <option key={r.slug} value={r.slug}>{r.label}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="RFID à attribuer" required>
+              <input className={`${inp} font-mono`} value={approveForm.rfiduid} onChange={(e) => setApproveForm({ ...approveForm, rfiduid: sanitizeRfid(e.target.value) })} maxLength={8} placeholder="A1B2C3D4" />
+            </Field>
+            <Field label="PIN" required>
+              <input className={`${inp} font-mono`} type="password" value={approveForm.pin} onChange={(e) => setApproveForm({ ...approveForm, pin: e.target.value.replace(/[^0-9]/g, '').slice(0, 8) })} placeholder="••••" />
+            </Field>
+          </div>
+          <div className="flex gap-3 mt-6">
+            <button disabled={busy} onClick={() => void onApprove()} className="flex-1 py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-black">
+              {busy ? '...' : 'Valider et créer le compte'}
+            </button>
+            <button onClick={() => setApproveOpen(null)} className={`px-5 py-3 border rounded-xl font-bold ${inp}`}>Annuler</button>
+          </div>
+        </Modal>
+      )}
+
     </div>
   );
 };
@@ -3331,7 +3778,7 @@ export const AdminShell = ({ onSwitchToKiosk, currentDoctor, onLogout }: { onSwi
     { id: 'interactions' as AdminView, label: 'Interactions', icon: Shield },
     { id: 'analytics' as AdminView, label: 'Analytique', icon: BarChart3 },
     { id: 'shift' as AdminView, label: 'Rapport relève', icon: FileText },
-    { id: 'doctors' as AdminView, label: 'Compte médecin', icon: Stethoscope },
+    { id: 'doctors' as AdminView, label: 'Équipe médicale', icon: Stethoscope },
     { id: 'audit' as AdminView, label: "Journal d'audit", icon: Shield },
     { id: 'tech' as AdminView, label: 'Vue Technique', icon: Wrench },
   ];

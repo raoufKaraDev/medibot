@@ -144,6 +144,12 @@ def infer_role_code(role: Optional[str]) -> str:
     role_lower = role.lower()
     if "chef" in role_lower:
         return "chef"
+    elif "interne" in role_lower:
+        return "interne"
+    elif "résident" in role_lower or "resident" in role_lower:
+        return "resident"
+    elif "assistant" in role_lower:
+        return "assistant"
     elif "infirmier" in role_lower or "nurse" in role_lower:
         return "infirmier"
     elif "pharma" in role_lower:

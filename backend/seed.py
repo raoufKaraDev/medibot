@@ -84,7 +84,7 @@ def _seed_default_admin(conn) -> None:
     try:
         ph = __import__('passlib.context', fromlist=['CryptContext']).CryptContext(schemes=["bcrypt"], deprecated="auto").hash("1234")
         c.execute(
-            """INSERT INTO doctors(name, role, rfid_uid, pin, pin_hash, username, passwordhash, status)
+            """INSERT INTO doctors(name, role, rfid_uid, pin, pin_hash, username, password_hash, status)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "Dr. KARA Abderraouf",

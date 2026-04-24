@@ -801,36 +801,24 @@ def init_db():
     except Exception:
         pass  # Column already exists
 
-    # ── Enforce single-doctor model: Delete all doctors and seed only Dr. KARA Abderraouf ──
-    # Delete all existing doctors
-    c.execute("DELETE FROM doctors")
+    # ── Ensure extended doctor columns exist (older DBs) ────────────
+    for stmt in [
+        "ALTER TABLE doctors ADD COLUMN photo TEXT",
+        "ALTER TABLE doctors ADD COLUMN pin_hash TEXT",
+        "ALTER TABLE doctors ADD COLUMN can_prescribe INTEGER DEFAULT 1",
+        "ALTER TABLE doctors ADD COLUMN role_code TEXT DEFAULT 'medecin'",
+    ]:
+        try:
+            c.execute(stmt)
+            conn.commit()
+        except Exception:
+            pass
 
-    # Insert the single allowed doctor
-    ph = pwd_context.hash("kara1235")  # Hash the password
-    c.execute(
-        """INSERT INTO doctors(
-            rfid_uid, name, role, pin, pin_hash,
-            username, password_hash, can_prescribe, role_code, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            "3E487B89",                    # rfid_uid
-            "Dr. KARA Abderraouf",         # name
-            "Médecin Chef Pédiatrie",      # role
-            "1234",                        # pin
-            ph,                            # pin_hash
-            "kara",                        # username
-            ph,                            # password_hash (same as pin_hash for simplicity)
-            1,                             # can_prescribe
-            "medecin",                     # role_code
-            "ACTIVE"                       # status
-        ),
-    )
-
-    # Ensure uniqueness constraints via triggers or application logic
-    # SQLite doesn't support adding UNIQUE constraints easily after table creation,
-    # so we'll enforce uniqueness in the API layer
-
-    conn.commit()
+    # ── Seed default Chef de Service account (only if none exists) ──
+    try:
+        seed._seed_default_admin(conn)
+    except Exception as ex:
+        print(f"[init_db] seed_default_admin: {ex}")
 
     # ── Seed patients ──────────────────────────────────────────────
     seed_patients = [

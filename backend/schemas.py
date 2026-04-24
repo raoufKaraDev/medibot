@@ -65,6 +65,68 @@ class DoctorUpdate(BaseModel):
     status: Optional[str] = None
 
 
+# Admin-controlled doctor account management (username/password/RFID/role/state)
+class AdminDoctorCreate(BaseModel):
+    fullname: str
+    username: str
+    password: str
+    role: str
+    rfiduid: str
+    pin: Optional[str] = None
+    phone: Optional[str] = None
+    status: str = "ACTIVE"
+    note: Optional[str] = None
+    photo: Optional[str] = None
+
+    @field_validator("rfiduid")
+    @classmethod
+    def validate_rfiduid(cls, value: str) -> str:
+        return normalize_rfid(value)
+
+    @field_validator("status")
+    @classmethod
+    def normalize_status(cls, value: str) -> str:
+        v = (value or "").strip().upper()
+        if v not in ("ACTIVE", "SUSPENDED"):
+            raise ValueError("status must be ACTIVE or SUSPENDED")
+        return v
+
+
+class AdminDoctorUpdate(BaseModel):
+    fullname: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+    rfiduid: Optional[str] = None
+    pin: Optional[str] = None
+    phone: Optional[str] = None
+    status: Optional[str] = None
+    note: Optional[str] = None
+    photo: Optional[str] = None
+
+    @field_validator("rfiduid")
+    @classmethod
+    def validate_rfiduid_optional(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return normalize_rfid(value)
+
+    @field_validator("status")
+    @classmethod
+    def normalize_status_optional(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        v = (value or "").strip().upper()
+        if v not in ("ACTIVE", "SUSPENDED"):
+            raise ValueError("status must be ACTIVE or SUSPENDED")
+        return v
+
+
+class AdminResetCredentials(BaseModel):
+    password: Optional[str] = None
+    pin: Optional[str] = None
+
+
 class StaffRegisterRequest(BaseModel):
     fullname: str
     username: str
