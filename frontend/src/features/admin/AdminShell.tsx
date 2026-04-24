@@ -143,8 +143,12 @@ interface AuditEntry { id:number; actor:string; actor_role:string; action:string
 // ── Medical Staff Roles ────────────────────────────────────────────
 const ROLES = [
   { label: "Chef de Service",        slug: "CHEF_SERVICE" },
+  { label: "Médecin",                slug: "MEDECIN" },
+  { label: "Pédiatre",               slug: "PEDIATRE" },
   { label: "Médecin Spécialiste",    slug: "MEDECIN_SPECIALISTE" },
+  { label: "Médecin Assistant",      slug: "MEDECIN_ASSISTANT" },
   { label: "Médecin Résident",       slug: "MEDECIN_RESIDENT" },
+  { label: "Interne",                slug: "INTERNE" },
   { label: "Médecin Généraliste",    slug: "MEDECIN_GENERALISTE" },
   { label: "Cadre de Santé",         slug: "CADRE_SANTE" },
   { label: "Infirmier(ère)",         slug: "INFIRMIER" },
@@ -156,15 +160,15 @@ const isSuperAdmin = (role: string | undefined) => role === SUPER_ADMIN_ROLE;
 
 // ── Role-based page access rules ───────────────────────────────────
 const PAGE_ACCESS: Record<string, string[]> = {
-  dashboard:    ["CHEF_SERVICE", "MEDECIN_SPECIALISTE", "MEDECIN_RESIDENT", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
-  rooms:        ["CHEF_SERVICE", "MEDECIN_SPECIALISTE", "MEDECIN_RESIDENT", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
-  patients:     ["CHEF_SERVICE", "MEDECIN_SPECIALISTE", "MEDECIN_RESIDENT", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
+  dashboard:    ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE", "MEDECIN_ASSISTANT", "MEDECIN_RESIDENT", "INTERNE", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
+  rooms:        ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE", "MEDECIN_ASSISTANT", "MEDECIN_RESIDENT", "INTERNE", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
+  patients:     ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE", "MEDECIN_ASSISTANT", "MEDECIN_RESIDENT", "INTERNE", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
   pharmacy:     ["CHEF_SERVICE", "CADRE_SANTE", "PHARMACIEN"],
   doctors:      ["CHEF_SERVICE"],
-  validation:   ["CHEF_SERVICE", "MEDECIN_SPECIALISTE", "MEDECIN_RESIDENT", "MEDECIN_GENERALISTE"],
-  interactions: ["CHEF_SERVICE", "MEDECIN_SPECIALISTE", "MEDECIN_RESIDENT"],
-  analytics:    ["CHEF_SERVICE", "MEDECIN_SPECIALISTE"],
-  shift:        ["CHEF_SERVICE", "MEDECIN_SPECIALISTE", "MEDECIN_RESIDENT", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
+  validation:   ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE", "MEDECIN_ASSISTANT", "MEDECIN_RESIDENT", "MEDECIN_GENERALISTE"],
+  interactions: ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE", "MEDECIN_ASSISTANT", "MEDECIN_RESIDENT"],
+  analytics:    ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE"],
+  shift:        ["CHEF_SERVICE", "MEDECIN", "PEDIATRE", "MEDECIN_SPECIALISTE", "MEDECIN_ASSISTANT", "MEDECIN_RESIDENT", "INTERNE", "MEDECIN_GENERALISTE", "CADRE_SANTE", "INFIRMIER"],
   tech:         ["CHEF_SERVICE"],
   audit:        ["CHEF_SERVICE"],
 };
