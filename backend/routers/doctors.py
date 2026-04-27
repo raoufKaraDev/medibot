@@ -213,10 +213,20 @@ def update_doctor_status(doctor_id: int, data: dict):
             raise HTTPException(400, "Statut invalide. Valeurs acceptées: ACTIVE, SUSPENDED")
         
         conn = get_db()
-        existing = conn.execute("SELECT id, name FROM doctors WHERE id=?", (doctor_id,)).fetchone()
+        existing = conn.execute("SELECT id, name, role, status FROM doctors WHERE id=?", (doctor_id,)).fetchone()
         if not existing:
             conn.close()
             raise HTTPException(404, "Médecin introuvable")
+
+        ex = dict(existing)
+        # Safety: never suspend the last active Chef de Service account
+        if status == "SUSPENDED" and (ex.get("role") or "").upper() == "CHEF_SERVICE":
+            n_admin = conn.execute(
+                "SELECT COUNT(*) AS n FROM doctors WHERE status='ACTIVE' AND UPPER(role)='CHEF_SERVICE' AND id != ?",
+                (doctor_id,),
+            ).fetchone()["n"]
+            if int(n_admin) == 0:
+                raise HTTPException(409, "Impossible de suspendre le dernier compte Chef de Service actif")
         
         conn.execute("UPDATE doctors SET status=? WHERE id=?", (status, doctor_id))
         conn.commit()
@@ -369,31 +379,8 @@ def admin_set_doctor_status(doctor_id: int, data: dict):
 
 @router.put("/api/admin/doctors/{doctor_id}/reset")
 def admin_reset_credentials(doctor_id: int, data: AdminResetCredentials):
-    conn = get_db()
-    try:
-        existing = conn.execute("SELECT id, name FROM doctors WHERE id=?", (doctor_id,)).fetchone()
-        if not existing:
-            raise HTTPException(404, "Médecin introuvable")
-
-        fields = {}
-        if data.password is not None:
-            fields["password_hash"] = hash_password(data.password)
-        if data.pin is not None:
-            fields["pin"] = data.pin.strip()
-            fields["pin_hash"] = pwd_context.hash(data.pin.strip())
-        if not fields:
-            raise HTTPException(400, "Aucun changement demandé")
-
-        sets = ", ".join([f"{k}=?" for k in fields.keys()])
-        conn.execute(f"UPDATE doctors SET {sets} WHERE id=?", (*fields.values(), doctor_id))
-        try:
-            write_audit(conn, actor="système", actor_role="système", action="RESET_DOCTOR_CREDENTIALS", target_type="doctor", target_id=doctor_id, detail={"fields": list(fields.keys())})
-        except Exception:
-            pass
-        conn.commit()
-        return {"ok": True}
-    finally:
-        conn.close()
+    # Privacy policy: credentials are private and cannot be reset by admin through this panel.
+    raise HTTPException(403, "Action non autorisée : reset des identifiants interdit")
 
 
 # ══════════════════════════════════════════════════════════════════
