@@ -558,6 +558,8 @@ const OrdonnancePanel = ({
   // Fixed prescriber values (Single doctor model)
   const prescriber = currentDoctor?.name ?? '';
   const prescriberRole = currentDoctor?.role ?? '';
+  // Define isInterne to prevent ReferenceError
+  const isInterne = currentDoctor?.role === 'INTERNE';
 
   // Load prescriptions
   const load = useCallback(async () => {
@@ -837,13 +839,12 @@ const OrdonnancePanel = ({
                 <div className="flex gap-2">
                   <button
                     onClick={handleSaveOrdonnance}
-                    disabled={isSaveDisabled()}
+                    disabled={!prescriber || newItems.length === 0}
                     className={`flex-1 px-4 py-2 font-bold rounded-lg text-white transition-all ${
-                      isSaveDisabled()
+                      !prescriber || newItems.length === 0
                         ? 'bg-gray-400 cursor-not-allowed'
                         : 'bg-teal-600 hover:bg-teal-700'
                     }`}
-                    title={isChef && delegating && !delegateTo ? 'Sélectionnez un médecin pour la délégation' : ''}
                   >
                     {getSaveButtonLabel()}
                   </button>
@@ -851,8 +852,6 @@ const OrdonnancePanel = ({
                     onClick={() => { 
                       setCreatingNew(false); 
                       setNewItems([]);
-                      setDelegating(false);
-                      setDelegateTo(null);
                     }}
                     className="px-4 py-2 border rounded-lg font-bold"
                   >

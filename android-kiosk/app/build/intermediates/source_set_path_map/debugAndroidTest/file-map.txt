@@ -1,0 +1,6 @@
+com.medibot.kiosk.test.app-androidTest-0 C:\ROBOT_MED\android-kiosk\app\build\generated\res\resValues\androidTest\debug
+com.medibot.kiosk.test.app-mergeDebugAndroidTestResources-1 C:\ROBOT_MED\android-kiosk\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\merged.dir
+com.medibot.kiosk.test.app-mergeDebugAndroidTestResources-2 C:\ROBOT_MED\android-kiosk\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\stripped.dir
+com.medibot.kiosk.test.app-merged_res-3 C:\ROBOT_MED\android-kiosk\app\build\intermediates\merged_res\debugAndroidTest
+com.medibot.kiosk.test.app-jetified-core-1.5.0-4 C:\Users\SOFT\.gradle\caches\transforms-4\32a1ed1590a66440cf1d5507831f73f9\transformed\jetified-core-1.5.0\res
+com.medibot.kiosk.test.app-jetified-annotation-experimental-1.3.0-5 C:\Users\SOFT\.gradle\caches\transforms-4\b3c337bc312ded6d8ada5b5f711c1372\transformed\jetified-annotation-experimental-1.3.0\res

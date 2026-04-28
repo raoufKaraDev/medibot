@@ -1,0 +1,152 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.medibot.kiosk"
+4    android:versionCode="1"
+5    android:versionName="1.0.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="26"
+9        android:targetSdkVersion="34" />
+10
+11    <!-- Network permissions -->
+12    <uses-permission android:name="android.permission.INTERNET" />
+12-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:6:5-67
+12-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:6:22-64
+13    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+13-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:7:5-79
+13-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:7:22-76
+14
+15    <!-- Device policy (kiosk lock) -->
+16    <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
+16-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:10:5-76
+16-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:10:22-73
+17
+18    <!-- Battery status (optional: for battery level display) -->
+19    <uses-permission android:name="android.permission.BATTERY_STATS" />
+19-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:13:5-72
+19-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:13:22-69
+20
+21    <!-- Prevent app from being removed -->
+22    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+22-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:16:5-81
+22-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:16:22-78
+23
+24    <permission
+24-->[androidx.core:core:1.12.0] C:\Users\SOFT\.gradle\caches\transforms-4\4873b02c9a8c0be05654cdd48925f1a6\transformed\core-1.12.0\AndroidManifest.xml:22:5-24:47
+25        android:name="com.medibot.kiosk.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+25-->[androidx.core:core:1.12.0] C:\Users\SOFT\.gradle\caches\transforms-4\4873b02c9a8c0be05654cdd48925f1a6\transformed\core-1.12.0\AndroidManifest.xml:23:9-81
+26        android:protectionLevel="signature" />
+26-->[androidx.core:core:1.12.0] C:\Users\SOFT\.gradle\caches\transforms-4\4873b02c9a8c0be05654cdd48925f1a6\transformed\core-1.12.0\AndroidManifest.xml:24:9-44
+27
+28    <uses-permission android:name="com.medibot.kiosk.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+28-->[androidx.core:core:1.12.0] C:\Users\SOFT\.gradle\caches\transforms-4\4873b02c9a8c0be05654cdd48925f1a6\transformed\core-1.12.0\AndroidManifest.xml:26:5-97
+28-->[androidx.core:core:1.12.0] C:\Users\SOFT\.gradle\caches\transforms-4\4873b02c9a8c0be05654cdd48925f1a6\transformed\core-1.12.0\AndroidManifest.xml:26:22-94
+29
+30    <application
+30-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:18:5-62:19
+31        android:allowBackup="false"
+31-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:19:9-36
+32        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+32-->[androidx.core:core:1.12.0] C:\Users\SOFT\.gradle\caches\transforms-4\4873b02c9a8c0be05654cdd48925f1a6\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
+33        android:dataExtractionRules="@xml/data_extraction_rules"
+33-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:20:9-65
+34        android:debuggable="true"
+34-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:21:9-35
+35        android:extractNativeLibs="false"
+36        android:fullBackupContent="@xml/backup_scheme"
+36-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:22:9-55
+37        android:label="@string/app_name"
+37-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:23:9-41
+38        android:supportsRtl="true"
+38-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:24:9-35
+39        android:theme="@style/Theme.MediBotKiosk"
+39-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:25:9-50
+40        android:usesCleartextTraffic="true" >
+40-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:26:9-44
+41
+42        <!-- Main Kiosk Activity -->
+43        <activity
+43-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:29:9-38:20
+44            android:name="com.medibot.kiosk.KioskActivity"
+44-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:30:13-42
+45            android:exported="true"
+45-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:31:13-36
+46            android:launchMode="singleInstance"
+46-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:33:13-48
+47            android:screenOrientation="landscape" >
+47-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:32:13-50
+48            <intent-filter>
+48-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:34:13-37:29
+49                <action android:name="android.intent.action.MAIN" />
+49-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:35:17-69
+49-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:35:25-66
+50
+51                <category android:name="android.intent.category.LAUNCHER" />
+51-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:36:17-77
+51-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:36:27-74
+52            </intent-filter>
+53        </activity>
+54
+55        <!-- Device admin receiver (for kiosk lock) -->
+56        <receiver
+56-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:41:9-51:20
+57            android:name="com.medibot.kiosk.admin.KioskDeviceAdminReceiver"
+57-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:42:13-59
+58            android:exported="true"
+58-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:43:13-36
+59            android:permission="android.permission.BIND_DEVICE_ADMIN" >
+59-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:44:13-70
+60            <meta-data
+60-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:45:13-47:63
+61                android:name="android.app.device_admin"
+61-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:46:17-56
+62                android:resource="@xml/device_admin_policy" />
+62-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:47:17-60
+63
+64            <intent-filter>
+64-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:48:13-50:29
+65                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+65-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:49:17-82
+65-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:49:25-79
+66            </intent-filter>
+67        </receiver>
+68
+69        <!-- Boot receiver (auto-start on device reboot) -->
+70        <receiver
+70-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:54:9-60:20
+71            android:name="com.medibot.kiosk.receiver.BootReceiver"
+71-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:55:13-50
+72            android:exported="false" >
+72-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:56:13-37
+73            <intent-filter>
+73-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:57:13-59:29
+74                <action android:name="android.intent.action.BOOT_COMPLETED" />
+74-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:58:17-79
+74-->C:\ROBOT_MED\android-kiosk\app\src\main\AndroidManifest.xml:58:25-76
+75            </intent-filter>
+76        </receiver>
+77
+78        <provider
+78-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:24:9-32:20
+79            android:name="androidx.startup.InitializationProvider"
+79-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:25:13-67
+80            android:authorities="com.medibot.kiosk.androidx-startup"
+80-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:26:13-68
+81            android:exported="false" >
+81-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:27:13-37
+82            <meta-data
+82-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:29:13-31:52
+83                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+83-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:30:17-75
+84                android:value="androidx.startup" />
+84-->[androidx.emoji2:emoji2:1.2.0] C:\Users\SOFT\.gradle\caches\transforms-4\fa5149d7c24581e58aa21ab51265e360\transformed\jetified-emoji2-1.2.0\AndroidManifest.xml:31:17-49
+85            <meta-data
+85-->[androidx.lifecycle:lifecycle-process:2.4.1] C:\Users\SOFT\.gradle\caches\transforms-4\c3ca9f678d16b5b574f1db46098900d1\transformed\jetified-lifecycle-process-2.4.1\AndroidManifest.xml:31:13-33:52
+86                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+86-->[androidx.lifecycle:lifecycle-process:2.4.1] C:\Users\SOFT\.gradle\caches\transforms-4\c3ca9f678d16b5b574f1db46098900d1\transformed\jetified-lifecycle-process-2.4.1\AndroidManifest.xml:32:17-78
+87                android:value="androidx.startup" />
+87-->[androidx.lifecycle:lifecycle-process:2.4.1] C:\Users\SOFT\.gradle\caches\transforms-4\c3ca9f678d16b5b574f1db46098900d1\transformed\jetified-lifecycle-process-2.4.1\AndroidManifest.xml:33:17-49
+88        </provider>
+89    </application>
+90
+91</manifest>

@@ -260,7 +260,47 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
             (dtdate.today().isoformat(), patient_id,)
         )
         
-        # Create compte-rendu de sortie
+        # Create compte-rendu de sortie (only if sejour_id exists)
+        # If patient was created directly (not through SEJOUR), create minimal dossier and sejour
+        sejour_id = patient.get("sejour_id")
+        dossier_id = patient.get("dossier_id")
+        
+        # If no dossier_id, create one first
+        if not dossier_id:
+            d = conn.execute(
+                """INSERT INTO dossiers(
+                    nom, prenom, date_naissance, sexe, telephone, created_by
+                ) VALUES (?,?,?,?,?,?)""",
+                (
+                    patient.get("last_name", "Inconnu"),
+                    patient.get("first_name", "Inconnu"),
+                    patient.get("date_naissance", ""),
+                    patient.get("sexe", "M"),
+                    patient.get("telephone", ""),
+                    data.medecin_sortie,
+                ),
+            )
+            dossier_id = d.lastrowid
+        
+        # If no sejour_id, create one (patient admission without formal sejour)
+        if not sejour_id:
+            c = conn.execute(
+                """INSERT INTO sejours(
+                    dossier_id, date_entree, diagnostic_entree,
+                    roomid, bed, etat, created_by
+                ) VALUES (?,?,?,?,?,?,?)""",
+                (
+                    dossier_id,
+                    patient.get("date_naissance", dtdate.today().isoformat()),
+                    patient.get("diagnostic", "Non spécifié"),
+                    patient.get("room_id"),
+                    patient.get("bed"),
+                    "discharged",
+                    data.medecin_sortie,
+                ),
+            )
+            sejour_id = c.lastrowid
+        
         crs_cursor = conn.execute(
             """INSERT INTO comptes_rendus_sortie(
                 sejour_id, dossier_id, date_redaction,
@@ -270,8 +310,8 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
                 scam_signature
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                patient.get("sejour_id"),
-                patient.get("dossier_id"),
+                sejour_id,
+                dossier_id,
                 dtdate.today().isoformat(),
                 data.medecin_sortie,
                 data.diagnostic_sortie,

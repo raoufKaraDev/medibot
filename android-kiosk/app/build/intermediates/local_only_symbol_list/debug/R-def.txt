@@ -1,0 +1,16 @@
+R_DEF: Internal format may change without notice
+local
+color accent
+color error
+color primary
+color primary_dark
+color white
+id kiosk_container
+id kiosk_webview
+layout activity_kiosk
+string admin_receiver_label
+string app_name
+style Theme.MediBotKiosk
+xml backup_scheme
+xml data_extraction_rules
+xml device_admin_policy
