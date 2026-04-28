@@ -2147,7 +2147,7 @@ export default function KioskView({ onSwitchToAdmin }: Props) {
   // PRESCRIPTION
   // ══════════════════════════════════════════════════════════════════
   const robotBusy  = sysStatus.stm32 === 'busy';
-  const hasPerms   = doctor ? canDispense(doctor.role) : false;
+  const hasPerms   = !!doctor;
   const robotMeds  = medications.filter((m) => (m.distributed_by_robot ?? 1) === 1);
   const parentMeds = medications.filter((m) => (m.distributed_by_robot ?? 1) === 0);
 
@@ -2312,14 +2312,6 @@ export default function KioskView({ onSwitchToAdmin }: Props) {
           <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-300 rounded-xl mb-5">
             <Loader2 className="w-5 h-5 text-amber-600 animate-spin flex-shrink-0" />
             <span className="font-bold text-amber-700">Robot occupé — veuillez patienter</span>
-          </div>
-        )}
-
-        {/* Permission warning */}
-        {!hasPerms && (
-          <div className="flex items-center gap-3 p-4 bg-gray-100 border border-gray-300 rounded-xl mb-5">
-            <ShieldAlert className="w-5 h-5 text-gray-500 flex-shrink-0" />
-            <span className="text-gray-600 font-semibold">Mode consultation — votre rôle ne permet pas la distribution</span>
           </div>
         )}
 
