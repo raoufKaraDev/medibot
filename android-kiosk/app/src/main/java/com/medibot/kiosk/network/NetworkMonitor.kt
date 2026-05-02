@@ -7,7 +7,10 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import com.medibot.kiosk.KioskActivity
+import com.medibot.kiosk.config.KioskConfig
 import timber.log.Timber
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Monitors network connectivity and alerts activity of changes.
@@ -71,5 +74,22 @@ class NetworkMonitor(private val context: Context) {
         val activeNetwork = connectivityManager.activeNetwork ?: return false
         val caps = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    fun checkBackendConnectivity(context: Context, onResult: (Boolean) -> Unit) {
+        val url = "${KioskConfig.getApiBaseUrl(context)}/health"
+        Thread {
+            try {
+                val connection = URL(url).openConnection() as HttpURLConnection
+                connection.connectTimeout = 3000
+                connection.readTimeout = 3000
+                connection.requestMethod = "GET"
+                val reachable = connection.responseCode == 200
+                connection.disconnect()
+                onResult(reachable)
+            } catch (e: Exception) {
+                onResult(false)
+            }
+        }.start()
     }
 }

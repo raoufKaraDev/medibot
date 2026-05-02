@@ -16,15 +16,12 @@ object KioskConfig {
     private const val KEY_ALLOWED_HOSTS = "allowed_hosts"
 
     // Development defaults
-    private const val DEFAULT_KIOSK_URL = "http://192.168.1.127:3000/"  // Updated to Vite server
+    private const val DEFAULT_KIOSK_URL = "http://medibot.local:8000/kiosk"
     private val DEFAULT_ALLOWED_HOSTS = listOf(
-        "192.168.1.127",      // Laptop LAN IP
         "medibot.local",      // mDNS hostname
-        "10.0.0.0/8",         // Private subnet
-        "192.168.0.0/16",      // Private subnet
-        "172.16.0.0/12",       // Private subnet
+        "medibot-backup.example.com",
         "localhost",
-        "10.0.2.2"            // Android Emulator host loopback
+        "android.local"
     )
 
     fun getPrefs(context: Context): SharedPreferences {

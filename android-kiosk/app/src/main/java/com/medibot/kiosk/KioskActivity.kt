@@ -14,6 +14,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
@@ -131,8 +132,8 @@ class KioskActivity : AppCompatActivity() {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = false  // Security: disable local DB
-            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            userAgentString = buildKioskUserAgent()
+            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            userAgentString = "MediBot-Kiosk-Android/${BuildConfig.VERSION_NAME}"
 
             // Security headers
             if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.FORCE_DARK)) {
@@ -151,11 +152,6 @@ class KioskActivity : AppCompatActivity() {
         webView.clearHistory()
     }
 
-    private fun buildKioskUserAgent(): String {
-        val base = webView.settings.userAgentString
-        return "$base MediBot-Kiosk-Android/${BuildConfig.VERSION_NAME}"
-    }
-
     private fun enableKioskMode() {
         try {
             kioskPolicyManager.enableKioskMode()
@@ -167,7 +163,7 @@ class KioskActivity : AppCompatActivity() {
     }
 
     private fun loadKioskURL() {
-        val kioskURL = KioskConfig.getKioskURL(this)
+        val kioskURL = KioskConfig.getKioskUrl(this)
         Timber.d("Loading kiosk URL: $kioskURL")
         webView.loadUrl(kioskURL)
     }
@@ -232,7 +228,7 @@ class KioskActivity : AppCompatActivity() {
         webView.loadUrl("javascript:if(window.kioskAPI && window.kioskAPI.logout) window.kioskAPI.logout();")
         // Fallback: reload URL
         handler.postDelayed({
-            loadKioskURL()
+            webView.loadUrl("${KioskConfig.getApiBaseUrl(this)}/kiosk?logout=true")
         }, 500)
     }
 
