@@ -1,6 +1,6 @@
 import time
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 
 from config import APP_START, MQTT_HOST, MQTT_PORT, MQTT_WS_PORT
 from database import get_db, write_audit
@@ -24,6 +24,7 @@ from helpers import (
     _json_str_list_for_db,
 )
 from mqtt import TOPIC_CMD, get_mqtt, mqtt_publish, robot_state
+from middleware import require_local_admin
 from schemas import (
     DispenseRequest,
     DoctorCreate,
@@ -56,7 +57,7 @@ from schemas import (
     WasteBody,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_local_admin)])
 
 @router.get("/api/status")
 def api_status():

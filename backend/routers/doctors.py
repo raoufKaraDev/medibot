@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from passlib.context import CryptContext
 
 from database import get_db, write_audit
 from helpers import hash_password, row_to_dict, rows_to_list, infer_role_code
 from schemas import DoctorCreate, DoctorUpdate, AdminDoctorCreate, AdminDoctorUpdate, AdminResetCredentials
+from middleware import require_admin
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 router = APIRouter()
@@ -46,7 +47,7 @@ def admin_list_doctors():
     return list_doctors()
 
 
-@router.post("/api/doctors", status_code=201)
+@router.post("/api/doctors", status_code=201, dependencies=[Depends(require_admin)])
 def create_doctor(data: DoctorCreate):
     """Create a new doctor account with RFID, name, role, and PIN."""
     conn = None
@@ -135,7 +136,7 @@ def create_doctor(data: DoctorCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.put("/api/doctors/{doctor_id}")
+@router.put("/api/doctors/{doctor_id}", dependencies=[Depends(require_admin)])
 def update_doctor(doctor_id: int, data: DoctorUpdate):
     conn = None
     try:
@@ -167,7 +168,7 @@ def update_doctor(doctor_id: int, data: DoctorUpdate):
         raise
 
 
-@router.delete("/api/doctors/{doctor_id}")
+@router.delete("/api/doctors/{doctor_id}", dependencies=[Depends(require_admin)])
 def delete_doctor(doctor_id: int):
     conn = get_db()
     try:
@@ -203,7 +204,7 @@ def delete_doctor(doctor_id: int):
         conn.close()
 
 
-@router.put("/api/doctors/{doctor_id}/status")
+@router.put("/api/doctors/{doctor_id}/status", dependencies=[Depends(require_admin)])
 def update_doctor_status(doctor_id: int, data: dict):
     """Update doctor status (ACTIVE or SUSPENDED)."""
     conn = None
@@ -256,7 +257,7 @@ def update_doctor_status(doctor_id: int, data: dict):
 # ADMIN — full staff account management
 # ──────────────────────────────────────────────────────────────────
 
-@router.post("/api/admin/doctors", status_code=201)
+@router.post("/api/admin/doctors", status_code=201, dependencies=[Depends(require_admin)])
 def admin_create_doctor(data: AdminDoctorCreate):
     conn = get_db()
     try:
@@ -307,7 +308,7 @@ def admin_create_doctor(data: AdminDoctorCreate):
         conn.close()
 
 
-@router.put("/api/admin/doctors/{doctor_id}")
+@router.put("/api/admin/doctors/{doctor_id}", dependencies=[Depends(require_admin)])
 def admin_update_doctor(doctor_id: int, data: AdminDoctorUpdate):
     conn = get_db()
     try:
@@ -372,12 +373,12 @@ def admin_update_doctor(doctor_id: int, data: AdminDoctorUpdate):
         conn.close()
 
 
-@router.put("/api/admin/doctors/{doctor_id}/status")
+@router.put("/api/admin/doctors/{doctor_id}/status", dependencies=[Depends(require_admin)])
 def admin_set_doctor_status(doctor_id: int, data: dict):
     return update_doctor_status(doctor_id, data)
 
 
-@router.put("/api/admin/doctors/{doctor_id}/reset")
+@router.put("/api/admin/doctors/{doctor_id}/reset", dependencies=[Depends(require_admin)])
 def admin_reset_credentials(doctor_id: int, data: AdminResetCredentials):
     # Privacy policy: credentials are private and cannot be reset by admin through this panel.
     raise HTTPException(403, "Action non autorisée : reset des identifiants interdit")

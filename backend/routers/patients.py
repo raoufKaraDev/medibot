@@ -1,7 +1,7 @@
 from math import sqrt
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from database import get_db, write_audit
 from helpers import (
@@ -28,6 +28,7 @@ from schemas import (
     PhotoUpload,
     DeletePatientRequest,
 )
+from middleware import require_admin
 
 router = APIRouter(tags=["patients"])
 
@@ -69,7 +70,7 @@ def list_patients(room_id: Optional[int] = None, actifs_seulement: bool = True):
     return result
 
 
-@router.post("/api/patients", status_code=201)
+@router.post("/api/patients", status_code=201, dependencies=[Depends(require_admin)])
 def create_patient(data: PatientCreate):
     conn = None
     try:
@@ -218,7 +219,7 @@ def get_patient(patient_id: int):
             conn.close()
 
 
-@router.put("/api/patients/{patient_id}")
+@router.put("/api/patients/{patient_id}", dependencies=[Depends(require_admin)])
 def update_patient(patient_id: int, data: PatientUpdate):
     conn = get_db()
     try:
@@ -249,7 +250,7 @@ def update_patient(patient_id: int, data: PatientUpdate):
         conn.close()
 
 
-@router.delete("/api/patients/{patient_id}")
+@router.delete("/api/patients/{patient_id}", dependencies=[Depends(require_admin)])
 def delete_patient(patient_id: int, data: DeletePatientRequest):
     conn = get_db()
     try:
@@ -282,7 +283,7 @@ def delete_patient(patient_id: int, data: DeletePatientRequest):
         conn.close()
 
 
-@router.post("/api/patients/{patient_id}/photo")
+@router.post("/api/patients/{patient_id}/photo", dependencies=[Depends(require_admin)])
 def upload_photo(patient_id: int, data: PhotoUpload):
     conn = get_db()
     try:
@@ -313,7 +314,7 @@ def list_guardians(patient_id: int):
     return rows_to_list(rows)
 
 
-@router.post("/api/patients/{patient_id}/guardians", status_code=201)
+@router.post("/api/patients/{patient_id}/guardians", status_code=201, dependencies=[Depends(require_admin)])
 def add_guardian(patient_id: int, data: GuardianCreate):
     conn = get_db()
     try:
@@ -327,7 +328,7 @@ def add_guardian(patient_id: int, data: GuardianCreate):
         conn.close()
 
 
-@router.put("/api/guardians/{guardian_id}")
+@router.put("/api/guardians/{guardian_id}", dependencies=[Depends(require_admin)])
 def update_guardian(guardian_id: int, data: GuardianUpdate):
     conn = get_db()
     try:
@@ -344,7 +345,7 @@ def update_guardian(guardian_id: int, data: GuardianUpdate):
         conn.close()
 
 
-@router.delete("/api/guardians/{guardian_id}")
+@router.delete("/api/guardians/{guardian_id}", dependencies=[Depends(require_admin)])
 def delete_guardian(guardian_id: int):
     conn = get_db()
     try:
@@ -368,7 +369,7 @@ def list_patient_current_treatments(patient_id: int):
     return rows_to_list(rows)
 
 
-@router.post("/api/patients/{patient_id}/current-treatments", status_code=201)
+@router.post("/api/patients/{patient_id}/current-treatments", status_code=201, dependencies=[Depends(require_admin)])
 def add_patient_current_treatment(patient_id: int, data: PatientTreatmentCreate):
     from datetime import date as _date
 
@@ -388,7 +389,7 @@ def add_patient_current_treatment(patient_id: int, data: PatientTreatmentCreate)
         conn.close()
 
 
-@router.put("/api/patients/{patient_id}/current-treatments/{treatment_id}")
+@router.put("/api/patients/{patient_id}/current-treatments/{treatment_id}", dependencies=[Depends(require_admin)])
 def update_patient_current_treatment(patient_id: int, treatment_id: int, data: PatientTreatmentUpdate):
     conn = get_db()
     try:
@@ -408,7 +409,7 @@ def update_patient_current_treatment(patient_id: int, treatment_id: int, data: P
         conn.close()
 
 
-@router.delete("/api/patients/{patient_id}/current-treatments/{treatment_id}")
+@router.delete("/api/patients/{patient_id}/current-treatments/{treatment_id}", dependencies=[Depends(require_admin)])
 def delete_patient_current_treatment(patient_id: int, treatment_id: int):
     conn = get_db()
     try:
@@ -421,7 +422,7 @@ def delete_patient_current_treatment(patient_id: int, treatment_id: int):
         conn.close()
 
 
-@router.put("/api/patients/{patient_id}/notify-guardian")
+@router.put("/api/patients/{patient_id}/notify-guardian", dependencies=[Depends(require_admin)])
 def set_notify_guardian(patient_id: int, data: NotifyPatientBody):
     conn = get_db()
     try:
