@@ -31,7 +31,6 @@ interface PEWSBadgeProps {
 const PEWSBadge: React.FC<PEWSBadgeProps> = ({ vitals, dark }) => {
   if (!vitals) return null;
   
-  // Compute PEWS score from vitals
   const score = vitals.pews_score ?? 0;
   const label = vitals.label ?? "Surveillance standard";
   
@@ -174,7 +173,7 @@ const PAGE_ACCESS: Record<string, string[]> = {
   audit:        ["CHEF_SERVICE"],
 };
 
-// ── API — always uses appConfig.apiBaseUrl so it works on Netlify ──
+// ── API — always uses appConfig.apiBaseUrl ─────────────────────────
 const api = async (path: string, opts?: RequestInit) => {
   const base = appConfig.apiBaseUrl.replace(/\/$/, '');
   const r = await fetch(`${base}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -182,9 +181,6 @@ const api = async (path: string, opts?: RequestInit) => {
   return r.json();
 };
 
-/**
- * Normalize patient data from backend field names to frontend field names.
- */
 const normalizePatient = (p: any) => {
   if (!p) return p;
   return {
@@ -208,18 +204,43 @@ const normalizePatient = (p: any) => {
     drug_allergies: p.drug_allergies ?? p.allergie_medicaments ?? [],
     other_allergies: p.other_allergies ?? p.autres_allergies ?? [],
     guardian: p.guardian ?? p.tuteur ?? null,
-    phC: p.phC ?? 0,
-    phc: p.phc ?? 0,
-    phE: p.phE ?? 0,
-    phe: p.phe ?? 0,
-    phK: p.phK ?? 0,
-    phk: p.phk ?? 0,
+    phC: p.phC ?? 0, phc: p.phc ?? 0,
+    phE: p.phE ?? 0, phe: p.phe ?? 0,
+    phK: p.phK ?? 0, phk: p.phk ?? 0,
     phenotypedisplay: p.phenotypedisplay ?? p.phenotype_display ?? '',
     bloodtypedisplay: p.bloodtypedisplay ?? p.blood_type_display ?? p.bloodtype ?? '',
   };
 };
 
 const normalizePatients = (patients: any[]) => (patients || []).map(normalizePatient);
+
+// ── Demo Mode Detection ────────────────────────────────────────────
+const isDemoMode = (): boolean => {
+  const host = window.location.hostname;
+  return !(
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    /^192\.168\./.test(host)
+  );
+};
+
+// ── Demo Banner ────────────────────────────────────────────────────
+const DemoBanner = () => (
+  <motion.div
+    initial={{ opacity: 0, y: -8 }}
+    animate={{ opacity: 1, y: 0 }}
+    className="mb-6 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3"
+  >
+    <span className="text-lg">⚠️</span>
+    <div>
+      <p className="text-sm font-black text-amber-800">Mode démonstration</p>
+      <p className="text-xs text-amber-700 mt-0.5 leading-relaxed">
+        Vous consultez une démo statique. La connexion nécessite le réseau de l'Hôpital de Rouïba.
+        Les données patients et le robot ne sont pas accessibles ici.
+      </p>
+    </div>
+  </motion.div>
+);
 
 
 // ══════════════════════════════════════════════════════════════════
@@ -243,8 +264,11 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
     note: '',
   });
 
+  const isDemo = isDemoMode();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isDemo) return; // hard block on demo
     setError('');
     setLoading(true);
     try {
@@ -271,7 +295,9 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        className={`w-full max-w-md rounded-2xl border shadow-xl p-8 ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
+        className={`w-full max-w-md rounded-2xl border shadow-xl p-8 ${
+          dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        }`}
       >
         <div className="text-center mb-8">
           <div className="w-16 h-16 bg-teal-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
@@ -279,8 +305,13 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
           </div>
           <h1 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>MediBot</h1>
           <p className="text-teal-500 text-sm font-semibold mt-1">Administration</p>
-          <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Hôpital de Rouiba — Service Pédiatrie</p>
+          <p className={`text-xs mt-2 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+            Hôpital de Rouïba — Service Pédiatrie
+          </p>
         </div>
+
+        {/* ── Demo mode banner ── */}
+        {isDemo && <DemoBanner />}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -293,7 +324,7 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
               onChange={(e) => setUsername(e.target.value)}
               placeholder="Votre nom d'utilisateur"
               className={inp}
-              disabled={loading}
+              disabled={loading || isDemo}
             />
           </div>
 
@@ -307,7 +338,7 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               className={inp}
-              disabled={loading}
+              disabled={loading || isDemo}
             />
           </div>
 
@@ -319,29 +350,31 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
 
           <button
             type="submit"
-            disabled={loading || !username || !password}
+            disabled={loading || isDemo || !username || !password}
             className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-black text-sm transition-colors"
           >
-            {loading ? '…' : 'Se connecter'}
+            {isDemo ? '🔒 Accès réservé au réseau hospitalier' : loading ? '…' : 'Se connecter'}
           </button>
         </form>
 
-        <div className="mt-5 pt-5 border-t border-gray-200/60 dark:border-gray-700/60">
-          <button
-            type="button"
-            onClick={() => { setSignupMsg(''); setSignupOpen(true); }}
-            className={`w-full py-3 rounded-xl border text-sm font-black transition-colors ${
-              dark
-                ? 'border-gray-700 text-gray-300 hover:bg-gray-700'
-                : 'border-gray-200 text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            Demander un compte (inscription)
-          </button>
-          <p className={`text-[11px] mt-2 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
-            La création du compte est validée par le Chef de Service (attribution RFID + PIN).
-          </p>
-        </div>
+        {!isDemo && (
+          <div className="mt-5 pt-5 border-t border-gray-200/60 dark:border-gray-700/60">
+            <button
+              type="button"
+              onClick={() => { setSignupMsg(''); setSignupOpen(true); }}
+              className={`w-full py-3 rounded-xl border text-sm font-black transition-colors ${
+                dark
+                  ? 'border-gray-700 text-gray-300 hover:bg-gray-700'
+                  : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+              }`}
+            >
+              Demander un compte (inscription)
+            </button>
+            <p className={`text-[11px] mt-2 ${dark ? 'text-gray-500' : 'text-gray-500'}`}>
+              La création du compte est validée par le Chef de Service (attribution RFID + PIN).
+            </p>
+          </div>
+        )}
       </motion.div>
 
       {signupOpen && (
@@ -374,8 +407,8 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
           {signupMsg && (
             <div className={`mt-4 p-3 rounded-xl border text-sm font-bold ${
               signupMsg.startsWith('OK:')
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-900/20 dark:border-emerald-800 dark:text-emerald-300'
-                : 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-300'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                : 'bg-red-50 border-red-200 text-red-700'
             }`}>
               {signupMsg.replace(/^OK:/,'')}
             </div>
@@ -420,7 +453,6 @@ export const LoginView = ({ onLoginSuccess }: { onLoginSuccess: (doctor: Doctor)
 };
 
 // ── Theme-aware class helper ───────────────────────────────────────
-// Returns the right tailwind classes based on dark mode
 const tc = (light: string, dark: string, isDark: boolean) => isDark ? dark : light;
 
 // ── UI Atoms ───────────────────────────────────────────────────────
@@ -448,10 +480,16 @@ const Modal = ({ title, onClose, children, width='max-w-lg' }: ModalProps) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
       <motion.div initial={{opacity:0,scale:.95}} animate={{opacity:1,scale:1}} exit={{opacity:0,scale:.95}}
-        className={`rounded-2xl shadow-2xl w-full ${width} max-h-[90vh] overflow-y-auto ${dark ? 'bg-gray-900 border border-gray-700' : 'bg-white'}`}>
-        <div className={`flex items-center justify-between px-6 py-4 border-b ${dark ? 'border-gray-700' : 'border-gray-100'}`}>
+        className={`rounded-2xl shadow-2xl w-full ${width} max-h-[90vh] overflow-y-auto ${
+          dark ? 'bg-gray-900 border border-gray-700' : 'bg-white'
+        }`}>
+        <div className={`flex items-center justify-between px-6 py-4 border-b ${
+          dark ? 'border-gray-700' : 'border-gray-100'
+        }`}>
           <h3 className={`font-black text-lg ${dark ? 'text-white' : 'text-gray-900'}`}>{title}</h3>
-          <button onClick={onClose} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${dark ? 'bg-gray-800 hover:bg-gray-700 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 text-gray-500'}`}>
+          <button onClick={onClose} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${
+            dark ? 'bg-gray-800 hover:bg-gray-700 text-gray-400' : 'bg-gray-100 hover:bg-gray-200 text-gray-500'
+          }`}>
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -489,7 +527,8 @@ const ThemeToggle = () => {
   return (
     <button onClick={toggle} title={dark ? 'Mode clair' : 'Mode sombre'}
       className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all border ${
-        dark ? 'bg-gray-800 border-gray-700 text-yellow-400 hover:bg-gray-700' : 'bg-gray-100 border-gray-200 text-gray-600 hover:bg-gray-200'
+        dark ? 'bg-gray-800 border-gray-700 text-yellow-400 hover:bg-gray-700'
+             : 'bg-gray-100 border-gray-200 text-gray-600 hover:bg-gray-200'
       }`}>
       {dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
     </button>
@@ -497,7 +536,7 @@ const ThemeToggle = () => {
 };
 
 // ══════════════════════════════════════════════════════════════════
-// SYSTEM STATUS DOT (doctor-friendly — no MQTT/ESP32 jargon)
+// SYSTEM STATUS PILL
 // ══════════════════════════════════════════════════════════════════
 const SystemStatusPill = ({ techStatus }: { techStatus: TechStatus | null }) => {
   const ok = techStatus?.mqtt_broker === 'online';
@@ -508,14 +547,16 @@ const SystemStatusPill = ({ techStatus }: { techStatus: TechStatus | null }) => 
       : partial ? 'bg-amber-50 border-amber-200 text-amber-700'
       : 'bg-gray-50 border-gray-200 text-gray-400'
     }`}>
-      <span className={`w-2 h-2 rounded-full ${ok ? 'bg-emerald-500 animate-pulse' : partial ? 'bg-amber-500' : 'bg-gray-300'}`} />
+      <span className={`w-2 h-2 rounded-full ${
+        ok ? 'bg-emerald-500 animate-pulse' : partial ? 'bg-amber-500' : 'bg-gray-300'
+      }`} />
       {ok ? 'Robot opérationnel' : partial ? 'Vérification...' : 'Hors ligne'}
     </div>
   );
 };
 
 // ══════════════════════════════════════════════════════════════════
-// PRESCRIPTION HELPER FUNCTIONS
+// PRESCRIPTION HELPERS
 function parseDosageConcentration(dosageStr: string): number | null {
   if (!dosageStr) return null;
   const match = dosageStr.match(/(\d+\.?\d*)\s*mg\s*\/\s*(\d+\.?\d*)\s*ml/i);
@@ -533,7 +574,8 @@ function computeDoseMgPerKg(doseMg: number, weightKg: number | null): number | n
   return Math.round((doseMg / weightKg) * 100) / 100;
 }
 
-// ORDONNANCE (Prescription form) — WITH FULL PRESCRIBER LOGIC
+// ══════════════════════════════════════════════════════════════════
+// ORDONNANCE PANEL
 // ══════════════════════════════════════════════════════════════════
 const OrdonnancePanel = ({ 
   patient, 
@@ -545,7 +587,6 @@ const OrdonnancePanel = ({
   const { dark } = useTheme();
   const inp = useInpClass();
   
-  // State for prescriptions
   const [prescriptions, setPrescriptions] = useState([]);
   const [expandedId, setExpandedId] = useState<number|null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
@@ -557,13 +598,10 @@ const OrdonnancePanel = ({
   const [activeTab, setActiveTab] = useState<'ordonnances'|'audit'>('ordonnances');
   const [busy, setBusy] = useState(true);
 
-  // Fixed prescriber values (Single doctor model)
   const prescriber = currentDoctor?.name ?? '';
   const prescriberRole = currentDoctor?.role ?? '';
-  // Define isInterne to prevent ReferenceError
   const isInterne = currentDoctor?.role === 'INTERNE';
 
-  // Load prescriptions
   const load = useCallback(async () => {
     setBusy(true);
     try {
@@ -572,7 +610,6 @@ const OrdonnancePanel = ({
         api('/api/medications'),
         api('/api/pharmacy-stock'),
       ]).catch(() => [[], [], []]);
-      
       setPrescriptions(presc || []);
       setAllMeds(meds || []);
       setAllStock(stock || []);
@@ -581,20 +618,12 @@ const OrdonnancePanel = ({
     }
   }, [patient.id]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const handleAddItem = () => {
     setNewItems([...newItems, { 
-      med_name: '', 
-      dose_mg: null, 
-      frequency_per_day: 1, 
-      duration_days: 1, 
-      timing: 'Pendant le repas', 
-      route: 'Per os', 
-      is_system: true, 
-      medicationid: null 
+      med_name: '', dose_mg: null, frequency_per_day: 1, duration_days: 1,
+      timing: 'Pendant le repas', route: 'Per os', is_system: true, medicationid: null 
     }]);
   };
 
@@ -609,21 +638,14 @@ const OrdonnancePanel = ({
           date: new Date().toISOString().split('T')[0],
           notes: '',
           items: newItems.map(item => ({
-            med_name: item.med_name,
-            dosage: item.dosage || '',
-            dose_mg: item.dose_mg,
-            frequency_per_day: item.frequency_per_day,
-            duration_days: item.duration_days,
-            timing: item.timing,
-            route: item.route,
-            is_system: item.is_system,
-            medicationid: item.medicationid,
-            remarks: item.remarks || ''
+            med_name: item.med_name, dosage: item.dosage || '',
+            dose_mg: item.dose_mg, frequency_per_day: item.frequency_per_day,
+            duration_days: item.duration_days, timing: item.timing,
+            route: item.route, is_system: item.is_system,
+            medicationid: item.medicationid, remarks: item.remarks || ''
           })),
-          cosigner: null,
-          status: 'active',
-          actor: currentDoctor?.name,
-          actor_role: currentDoctor?.role,
+          cosigner: null, status: 'active',
+          actor: currentDoctor?.name, actor_role: currentDoctor?.role,
           prescriber: prescriber,
         })
       });
@@ -637,24 +659,19 @@ const OrdonnancePanel = ({
 
   const activeCount = prescriptions.filter((p: any) => !p.status || p.status === 'active').length;
 
-  const getSaveButtonLabel = () => {
-    return saving ? 'Enregistrement...' : '✓ Valider l\'ordonnance';
-  };
-
   return (
     <div className="p-6 max-w-5xl">
-      {/* Tab bar */}
       <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-gray-700">
-        <button
-          onClick={() => setActiveTab('ordonnances')}
-          className={`px-4 py-2 font-bold ${activeTab === 'ordonnances' ? 'text-teal-600 border-b-2 border-teal-600' : 'text-gray-500'}`}
-        >
+        <button onClick={() => setActiveTab('ordonnances')}
+          className={`px-4 py-2 font-bold ${
+            activeTab === 'ordonnances' ? 'text-teal-600 border-b-2 border-teal-600' : 'text-gray-500'
+          }`}>
           📋 Ordonnances ({prescriptions.length})
         </button>
-        <button
-          onClick={() => setActiveTab('audit')}
-          className={`px-4 py-2 font-bold ${activeTab === 'audit' ? 'text-teal-600 border-b-2 border-teal-600' : 'text-gray-500'}`}
-        >
+        <button onClick={() => setActiveTab('audit')}
+          className={`px-4 py-2 font-bold ${
+            activeTab === 'audit' ? 'text-teal-600 border-b-2 border-teal-600' : 'text-gray-500'
+          }`}>
           📜 Journal d'audit
         </button>
       </div>
@@ -663,31 +680,37 @@ const OrdonnancePanel = ({
         <div className="space-y-4">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>Ordonnances de {patient.full_name}</h2>
+              <h2 className={`text-2xl font-black ${dark ? 'text-white' : 'text-gray-900'}`}>
+                Ordonnances de {patient.full_name}
+              </h2>
               <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
                 {prescriptions.length} ordonnance(s) — {activeCount} active(s)
               </p>
             </div>
-            <button
-              onClick={() => setCreatingNew(!creatingNew)}
-              className="px-4 py-2 font-bold rounded-lg flex items-center gap-2 transition-all bg-teal-600 hover:bg-teal-700 text-white"
-            >
+            <button onClick={() => setCreatingNew(!creatingNew)}
+              className="px-4 py-2 font-bold rounded-lg flex items-center gap-2 bg-teal-600 hover:bg-teal-700 text-white">
               <Plus className="w-4 h-4" /> Nouvelle ordonnance
             </button>
           </div>
 
           {creatingNew && (
-            <div className={`border-2 border-teal-300 rounded-lg p-4 ${dark ? 'bg-teal-900/20' : 'bg-teal-50'}`}>
+            <div className={`border-2 border-teal-300 rounded-lg p-4 ${
+              dark ? 'bg-teal-900/20' : 'bg-teal-50'
+            }`}>
               <div className="space-y-4">
-                {/* PRESCRIBER CARD — simplified single doctor */}
-                <div className={`rounded-xl border p-4 mb-4 ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
-                  <p className={`text-xs font-black uppercase mb-3 ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-                    Prescripteur
-                  </p>
-
+                <div className={`rounded-xl border p-4 mb-4 ${
+                  dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+                }`}>
+                  <p className={`text-xs font-black uppercase mb-3 ${
+                    dark ? 'text-gray-400' : 'text-gray-500'
+                  }`}>Prescripteur</p>
                   {currentDoctor ? (
-                    <div className={`flex items-center gap-3 p-3 rounded-xl ${dark ? 'bg-teal-900/20 border border-teal-800' : 'bg-teal-50 border border-teal-100'}`}>
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${dark ? 'bg-teal-700 text-teal-200' : 'bg-teal-600 text-white'}`}>
+                    <div className={`flex items-center gap-3 p-3 rounded-xl ${
+                      dark ? 'bg-teal-900/20 border border-teal-800' : 'bg-teal-50 border border-teal-100'
+                    }`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm ${
+                        dark ? 'bg-teal-700 text-teal-200' : 'bg-teal-600 text-white'
+                      }`}>
                         {currentDoctor.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2)}
                       </div>
                       <div className="flex-1">
@@ -698,23 +721,9 @@ const OrdonnancePanel = ({
                           {currentDoctor.role}
                         </p>
                       </div>
-                      <div className="text-right">
-                        <p className={`text-xs font-bold ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
-                          {new Date().toLocaleDateString('fr-FR', {
-                            day: '2-digit', month: 'long', year: 'numeric'
-                          })}
-                        </p>
-                        <p className={`text-xs ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
-                          {new Date().toLocaleTimeString('fr-FR', {
-                            hour: '2-digit', minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-red-500 font-bold">
-                      ⚠️ Aucun médecin connecté
-                    </p>
+                    <p className="text-sm text-red-500 font-bold">⚠️ Aucun médecin connecté</p>
                   )}
                 </div>
 
@@ -725,72 +734,33 @@ const OrdonnancePanel = ({
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="text-xs font-bold">Médicament</label>
-                          <input
-                            type="text"
-                            value={item.med_name}
-                            onChange={e => {
-                              const updated = [...newItems];
-                              updated[idx].med_name = e.target.value;
-                              setNewItems(updated);
-                            }}
-                            placeholder="Nom du médicament"
-                            className={inp}
-                          />
+                          <input type="text" value={item.med_name}
+                            onChange={e => { const u=[...newItems]; u[idx].med_name=e.target.value; setNewItems(u); }}
+                            placeholder="Nom du médicament" className={inp} />
                         </div>
                         <div>
                           <label className="text-xs font-bold">Dose (mg)</label>
-                          <input
-                            type="number"
-                            value={item.dose_mg || ''}
-                            onChange={e => {
-                              const updated = [...newItems];
-                              updated[idx].dose_mg = parseFloat(e.target.value) || null;
-                              setNewItems(updated);
-                            }}
-                            placeholder="500"
-                            className={inp}
-                          />
+                          <input type="number" value={item.dose_mg || ''}
+                            onChange={e => { const u=[...newItems]; u[idx].dose_mg=parseFloat(e.target.value)||null; setNewItems(u); }}
+                            placeholder="500" className={inp} />
                         </div>
                         <div>
                           <label className="text-xs font-bold">Fréquence/jour</label>
-                          <input
-                            type="number"
-                            min="1"
-                            max="6"
-                            value={item.frequency_per_day}
-                            onChange={e => {
-                              const updated = [...newItems];
-                              updated[idx].frequency_per_day = parseInt(e.target.value);
-                              setNewItems(updated);
-                            }}
-                            className={inp}
-                          />
+                          <input type="number" min="1" max="6" value={item.frequency_per_day}
+                            onChange={e => { const u=[...newItems]; u[idx].frequency_per_day=parseInt(e.target.value); setNewItems(u); }}
+                            className={inp} />
                         </div>
                         <div>
                           <label className="text-xs font-bold">Durée (jours)</label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.duration_days}
-                            onChange={e => {
-                              const updated = [...newItems];
-                              updated[idx].duration_days = parseInt(e.target.value);
-                              setNewItems(updated);
-                            }}
-                            className={inp}
-                          />
+                          <input type="number" min="1" value={item.duration_days}
+                            onChange={e => { const u=[...newItems]; u[idx].duration_days=parseInt(e.target.value); setNewItems(u); }}
+                            className={inp} />
                         </div>
                         <div>
                           <label className="text-xs font-bold">Moment</label>
-                          <select
-                            value={item.timing}
-                            onChange={e => {
-                              const updated = [...newItems];
-                              updated[idx].timing = e.target.value;
-                              setNewItems(updated);
-                            }}
-                            className={inp}
-                          >
+                          <select value={item.timing}
+                            onChange={e => { const u=[...newItems]; u[idx].timing=e.target.value; setNewItems(u); }}
+                            className={inp}>
                             <option>Pendant le repas</option>
                             <option>Avant le repas</option>
                             <option>Après le repas</option>
@@ -800,15 +770,9 @@ const OrdonnancePanel = ({
                         </div>
                         <div>
                           <label className="text-xs font-bold">Voie</label>
-                          <select
-                            value={item.route}
-                            onChange={e => {
-                              const updated = [...newItems];
-                              updated[idx].route = e.target.value;
-                              setNewItems(updated);
-                            }}
-                            className={inp}
-                          >
+                          <select value={item.route}
+                            onChange={e => { const u=[...newItems]; u[idx].route=e.target.value; setNewItems(u); }}
+                            className={inp}>
                             <option>Per os</option>
                             <option>IV lent</option>
                             <option>IM</option>
@@ -817,82 +781,60 @@ const OrdonnancePanel = ({
                           </select>
                         </div>
                       </div>
-                      <button
-                        onClick={() => setNewItems(newItems.filter((_, i) => i !== idx))}
-                        className="text-sm text-red-600 hover:text-red-700 font-bold"
-                      >
-                        ✕ Retirer
-                      </button>
+                      <button onClick={() => setNewItems(newItems.filter((_,i)=>i!==idx))}
+                        className="text-sm text-red-600 hover:text-red-700 font-bold">✕ Retirer</button>
                     </div>
                   ))}
-                  <button
-                    onClick={handleAddItem}
-                    disabled={isInterne}
+                  <button onClick={handleAddItem} disabled={isInterne}
                     className={`text-sm font-bold ${
-                      isInterne 
-                        ? 'text-gray-400 cursor-not-allowed'
-                        : 'text-teal-600 hover:text-teal-700'
-                    }`}
-                  >
-                    + Ajouter médicament
-                  </button>
+                      isInterne ? 'text-gray-400 cursor-not-allowed' : 'text-teal-600 hover:text-teal-700'
+                    }`}>+ Ajouter médicament</button>
                 </div>
 
                 <div className="flex gap-2">
-                  <button
-                    onClick={handleSaveOrdonnance}
+                  <button onClick={handleSaveOrdonnance}
                     disabled={!prescriber || newItems.length === 0}
-                    className={`flex-1 px-4 py-2 font-bold rounded-lg text-white transition-all ${
+                    className={`flex-1 px-4 py-2 font-bold rounded-lg text-white ${
                       !prescriber || newItems.length === 0
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : 'bg-teal-600 hover:bg-teal-700'
-                    }`}
-                  >
-                    {getSaveButtonLabel()}
+                        ? 'bg-gray-400 cursor-not-allowed' : 'bg-teal-600 hover:bg-teal-700'
+                    }`}>
+                    {saving ? 'Enregistrement...' : '✓ Valider l\'ordonnance'}
                   </button>
-                  <button
-                    onClick={() => { 
-                      setCreatingNew(false); 
-                      setNewItems([]);
-                    }}
-                    className="px-4 py-2 border rounded-lg font-bold"
-                  >
-                    Annuler
-                  </button>
+                  <button onClick={() => { setCreatingNew(false); setNewItems([]); }}
+                    className="px-4 py-2 border rounded-lg font-bold">Annuler</button>
                 </div>
               </div>
             </div>
           )}
 
-          {busy ? (
-            <Spinner />
-          ) : prescriptions.length === 0 ? (
+          {busy ? <Spinner /> : prescriptions.length === 0 ? (
             <div className={`text-center py-8 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
               <p>Aucune ordonnance enregistrée</p>
             </div>
           ) : (
             <div className="space-y-2">
               {prescriptions.map((ord: any) => (
-                <div
-                  key={ord.id}
-                  className={`border rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow ${dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
-                  onClick={() => setExpandedId(expandedId === ord.id ? null : ord.id)}
-                >
+                <div key={ord.id}
+                  className={`border rounded-lg p-4 cursor-pointer hover:shadow-md transition-shadow ${
+                    dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+                  }`}
+                  onClick={() => setExpandedId(expandedId === ord.id ? null : ord.id)}>
                   <div className="flex items-center justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className="text-lg font-bold">{ord.formatted_id}</span>
-                        <span className={`text-xs px-2 py-1 rounded ${ord.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
-                          {ord.status === 'active' ? '✓ Active' : 'Archivée'}
-                        </span>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          ord.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        }`}>{ord.status === 'active' ? '✓ Active' : 'Archivée'}</span>
                       </div>
                       <p className={`text-sm mt-1 ${dark ? 'text-gray-400' : 'text-gray-600'}`}>
                         {ord.doctor_name} — {ord.date} — {ord.items?.length || 0} médicaments
                       </p>
                     </div>
-                    <ChevronDown className={`w-5 h-5 transition-transform ${expandedId === ord.id ? 'rotate-180' : ''}`} />
+                    <ChevronDown className={`w-5 h-5 transition-transform ${
+                      expandedId === ord.id ? 'rotate-180' : ''
+                    }`} />
                   </div>
-
                   {expandedId === ord.id && (
                     <div className="mt-4 pt-4 border-t space-y-2">
                       {ord.items?.map((item: any, i: number) => (
