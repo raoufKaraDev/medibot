@@ -1,14 +1,19 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from config import IS_LOCAL, settings
 from database import init_db
 from middleware import register_audit_middleware
 from mqtt import setup_mqtt_client
+from routers.sync import router as sync_router
+from sync.scheduler import run_sync_loop
 import mqtt as mqtt_mod
 from routers import (
     analytics, audit, auth, dispense, doctors, interactions, lifecycle, medications,
@@ -19,9 +24,15 @@ from routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    setup_mqtt_client()
+    if IS_LOCAL:
+        setup_mqtt_client()
+        sync_task = asyncio.create_task(run_sync_loop())
+    else:
+        sync_task = None
     yield
-    if mqtt_mod._mqtt:
+    if sync_task:
+        sync_task.cancel()
+    if IS_LOCAL and mqtt_mod._mqtt:
         mqtt_mod._mqtt.loop_stop()
         mqtt_mod._mqtt.disconnect()
 
@@ -35,6 +46,28 @@ for _r in (
     pharmacy, audit, analytics, notifications, tech, interactions, vitals, lifecycle,
 ):
     app.include_router(_r.router)
+app.include_router(sync_router)
+
+
+@app.get("/health", tags=["system"])
+async def health_check():
+    mqtt_connected = False
+    if settings.MQTT_ENABLED:
+        try:
+            from mqtt import _mqtt
+            mqtt_connected = bool(_mqtt and _mqtt.is_connected())
+        except Exception:
+            mqtt_connected = False
+
+    return {
+        "status": "ok",
+        "environment": str(settings.ENVIRONMENT),
+        "timestamp": datetime.utcnow().isoformat(),
+        "mqtt_enabled": settings.MQTT_ENABLED,
+        "mqtt_connected": mqtt_connected,
+        "version": "1.0.0"
+    }
+
 
 FRONTEND_DIST = Path("dist")
 

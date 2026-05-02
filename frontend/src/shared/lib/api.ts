@@ -1,6 +1,8 @@
+import appConfig from './config';
+
 /** Typed JSON fetch helper used across admin views and extras. */
 export const api = async (path: string, opts?: RequestInit) => {
-  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const r = await fetch(`${appConfig.apiBaseUrl}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 };

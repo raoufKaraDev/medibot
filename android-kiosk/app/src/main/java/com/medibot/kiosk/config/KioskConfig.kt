@@ -9,20 +9,19 @@ import timber.log.Timber
  */
 object KioskConfig {
 
+    enum class Environment { LOCALHOSPITAL, REMOTEBACKUP }
+
     private const val PREFS_NAME = "kiosk_config"
     private const val KEY_KIOSK_URL = "kiosk_url"
     private const val KEY_ALLOWED_HOSTS = "allowed_hosts"
 
     // Development defaults
-    private const val DEFAULT_KIOSK_URL = "http://192.168.1.127:3000/"  // Updated to Vite server
+    private const val DEFAULT_KIOSK_URL = "http://medibot.local:8000/kiosk"
     private val DEFAULT_ALLOWED_HOSTS = listOf(
-        "192.168.1.127",      // Laptop LAN IP
         "medibot.local",      // mDNS hostname
-        "10.0.0.0/8",         // Private subnet
-        "192.168.0.0/16",      // Private subnet
-        "172.16.0.0/12",       // Private subnet
+        "medibot-backup.example.com",
         "localhost",
-        "10.0.2.2"            // Android Emulator host loopback
+        "android.local"
     )
 
     fun getPrefs(context: Context): SharedPreferences {
@@ -54,5 +53,42 @@ object KioskConfig {
         val prefs = getPrefs(context)
         prefs.edit().putString(KEY_ALLOWED_HOSTS, hosts.joinToString(";")).apply()
         Timber.d("Allowed hosts updated: $hosts")
+    }
+
+    fun getEnvironment(context: Context): Environment {
+        val env = context.getSharedPreferences("kioskconfig", Context.MODE_PRIVATE)
+            .getString("environment", "LOCALHOSPITAL")
+        return Environment.valueOf(env!!)
+    }
+
+    fun getApiBaseUrl(context: Context): String {
+        val env = getEnvironment(context)
+        return when (env) {
+            Environment.LOCALHOSPITAL -> {
+                val sharedPref = context.getSharedPreferences("kioskconfig", Context.MODE_PRIVATE)
+                sharedPref.getString("api_base_url", "http://192.168.1.100:8000")!!
+            }
+            Environment.REMOTEBACKUP -> "https://medibot-backup.example.com"
+        }
+    }
+
+    fun getKioskUrl(context: Context): String {
+        return "${getApiBaseUrl(context)}/kiosk"
+    }
+
+    fun getMqttBroker(context: Context): String? {
+        val env = getEnvironment(context)
+        return if (env == Environment.LOCALHOSPITAL) {
+            val sharedPref = context.getSharedPreferences("kioskconfig", Context.MODE_PRIVATE)
+            sharedPref.getString("mqtt_broker", "192.168.1.100")
+        } else null  // Remote backup does not use MQTT
+    }
+
+    fun getSessionTimeoutMinutes(context: Context): Int {
+        return if (getEnvironment(context) == Environment.LOCALHOSPITAL) 30 else 60
+    }
+
+    fun isLocalMode(context: Context): Boolean {
+        return getEnvironment(context) == Environment.LOCALHOSPITAL
     }
 }

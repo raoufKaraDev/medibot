@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.medibot.kiosk.KioskActivity
+import com.medibot.kiosk.config.KioskConfig
 import timber.log.Timber
 
 /**
@@ -17,9 +18,7 @@ import timber.log.Timber
 class SessionManager(private val context: Context) {
 
     companion object {
-        const val INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000L  // 15 minutes
         const val WARNING_TIME_MS = 2 * 60 * 1000L          // 2 minutes before timeout
-        const val WARNING_DISPLAY_SECONDS = 120             // 2 minutes countdown
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -27,9 +26,13 @@ class SessionManager(private val context: Context) {
     private var warningRunnable: Runnable? = null
     private var isActive = true
     private var warningDialog: TimeoutWarningDialog? = null
+    private val inactivityTimeoutMs: Long
+        get() = KioskConfig.getSessionTimeoutMinutes(context).toLong() * 60 * 1000L
+    private val warningDisplaySeconds: Int
+        get() = (WARNING_TIME_MS / 1000L).toInt()
 
     fun startTimeout() {
-        Timber.d("Starting session timeout monitor (${INACTIVITY_TIMEOUT_MS / 1000}s)")
+        Timber.d("Starting session timeout monitor (${inactivityTimeoutMs / 1000}s)")
         resetTimeout()
     }
 
@@ -49,7 +52,7 @@ class SessionManager(private val context: Context) {
             Timber.w("Session timeout warning: showing 2-minute countdown")
             showTimeoutWarning()
         }
-        handler.postDelayed(warningRunnable!!, INACTIVITY_TIMEOUT_MS - WARNING_TIME_MS)
+        handler.postDelayed(warningRunnable!!, inactivityTimeoutMs - WARNING_TIME_MS)
 
         // Schedule actual timeout
         timeoutRunnable = Runnable {
@@ -58,7 +61,7 @@ class SessionManager(private val context: Context) {
                 context.onSessionTimeout()
             }
         }
-        handler.postDelayed(timeoutRunnable!!, INACTIVITY_TIMEOUT_MS)
+        handler.postDelayed(timeoutRunnable!!, inactivityTimeoutMs)
 
         Timber.d("Session timeout reset")
     }
@@ -78,7 +81,7 @@ class SessionManager(private val context: Context) {
                 }
             }
         )
-        warningDialog?.show(WARNING_DISPLAY_SECONDS)
+        warningDialog?.show(warningDisplaySeconds)
     }
 
     fun cancel() {

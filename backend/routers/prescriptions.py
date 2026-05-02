@@ -3,7 +3,7 @@ import json
 from datetime import date as dtdate, datetime
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from database import get_db, write_audit
 from helpers import (
@@ -14,6 +14,7 @@ from schemas import (
     DoseCheckRequest, OrdonnanceCreate, PrescriptionDocCreate, 
     PrescriptionValidationBody
 )
+from middleware import require_local_admin, require_admin
 
 router = APIRouter(tags=["prescriptions"])
 
@@ -77,7 +78,7 @@ def list_prescriptions(patient_id: int):
         raise HTTPException(500, str(e))
 
 
-@router.post("/api/patients/{patient_id}/prescriptions")
+@router.post("/api/patients/{patient_id}/prescriptions", dependencies=[Depends(require_admin)])
 def create_prescription(patient_id: int, data: PrescriptionDocCreate):
     conn = get_db()
     try:
@@ -99,7 +100,7 @@ def create_prescription(patient_id: int, data: PrescriptionDocCreate):
         conn.close()
 
 
-@router.delete("/api/prescriptions/{prescription_id}")
+@router.delete("/api/prescriptions/{prescription_id}", dependencies=[Depends(require_admin)])
 def delete_prescription(prescription_id: int):
     conn = get_db()
     try:
@@ -138,7 +139,7 @@ def get_ordonnance_lignes(patient_id: int):
     return {"ordonnance_id": oid, "lignes": out}
 
 
-@router.post("/api/patients/{patient_id}/ordonnances", status_code=201)
+@router.post("/api/patients/{patient_id}/ordonnances", status_code=201, dependencies=[Depends(require_admin)])
 def post_ordonnance_patient(patient_id: int, data: OrdonnanceCreate):
     conn = get_db()
     try:
@@ -178,7 +179,7 @@ def post_ordonnance_patient(patient_id: int, data: OrdonnanceCreate):
         conn.close()
 
 
-@router.post("/api/ordonnances", status_code=201)
+@router.post("/api/ordonnances", status_code=201, dependencies=[Depends(require_admin)])
 def post_ordonnance_root(data: OrdonnanceCreate):
     return post_ordonnance_patient(data.patient_id, data)
 
@@ -193,7 +194,7 @@ def get_prescription_validation(patient_id: int):
     return dict(row)
 
 
-@router.put("/api/patients/{patient_id}/prescription-validation")
+@router.put("/api/patients/{patient_id}/prescription-validation", dependencies=[Depends(require_admin)])
 def put_prescription_validation(patient_id: int, data: PrescriptionValidationBody):
     conn = get_db()
     try:
@@ -239,7 +240,7 @@ def missed_doses_for_patient(patient_id: int):
     return {"missed": missed, "count": len(missed)}
 
 
-@router.post("/api/patients/{patient_id}/check-dose")
+@router.post("/api/patients/{patient_id}/check-dose", dependencies=[Depends(require_admin)])
 def check_dose(patient_id: int, body: DoseCheckRequest):
     conn = get_db()
     try:

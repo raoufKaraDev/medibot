@@ -6,12 +6,33 @@ import time
 from pathlib import Path
 
 from passlib.context import CryptContext
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 import seed
-from config import DB_PATH
+from config import DB_PATH, IS_LOCAL, settings
 from helpers import calc_dose_ml, hash_password, rows_to_list
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+DATABASE_URL = settings.DATABASE_URL
+
+if IS_LOCAL:
+    engine = create_engine(
+        f"sqlite:///{DB_PATH}",
+        connect_args={"check_same_thread": False},
+    )
+else:
+    db_url = (
+        DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
+        if DATABASE_URL.startswith("postgresql://")
+        else DATABASE_URL
+    )
+    engine = create_engine(db_url)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+Base.metadata.create_all(bind=engine)
 
 
 def write_audit(
@@ -202,6 +223,10 @@ def _ensure_single_doctor(conn) -> None:
 
 
 def init_db():
+    if not IS_LOCAL:
+        Base.metadata.create_all(bind=engine)
+        return
+
     conn = get_db(); c = conn.cursor()
     
     # ── Clean up any stale DEMO data on startup ──────────────────────────────────

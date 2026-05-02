@@ -18,6 +18,7 @@ import { DashboardView } from '@/features/admin/views/DashboardView';
 import { PharmacyView } from '@/features/admin/views/PharmacyView';
 import { RoomsView } from '@/features/admin/views/RoomsView';
 import { useTheme } from "@/shared/context/ThemeContext";
+import appConfig from '@/shared/lib/config';
 import { PhotoUpload } from '@/shared/components/PhotoUpload';
 import EmergencyPanel from '@/shared/components/EmergencyPanel';
 
@@ -3766,6 +3767,8 @@ const AuditLogView = () => {
 // ══════════════════════════════════════════════════════════════════
 export const AdminShell = ({ onSwitchToKiosk, currentDoctor, onLogout }: { onSwitchToKiosk:()=>void; currentDoctor: Doctor | null; onLogout:()=>void }) => {
   const { dark } = useTheme();
+  const isLocal  = appConfig.environment === 'LOCALHOSPITAL';
+  const isRemote = appConfig.environment === 'REMOTEBACKUP';
   const [view,setView]=useState<AdminView>('dashboard');
   const [techStatus,setTechStatus]=useState<TechStatus|null>(null);
 
@@ -3787,6 +3790,7 @@ export const AdminShell = ({ onSwitchToKiosk, currentDoctor, onLogout }: { onSwi
   ];
 
   const nav = allNav.filter(item => {
+    if (!isLocal && item.id === 'tech') return false;
     if (isSuperAdmin(currentDoctor?.role)) return true; // Super admin can access everything
     const allowed = PAGE_ACCESS[item.id as keyof typeof PAGE_ACCESS] || [];
     return currentDoctor && allowed.includes(currentDoctor.role);
@@ -3850,6 +3854,12 @@ export const AdminShell = ({ onSwitchToKiosk, currentDoctor, onLogout }: { onSwi
       </aside>
 
       <main className={`flex-1 min-h-0 overflow-hidden flex flex-col ${main}`}>
+        {isRemote && (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-2 rounded-lg mb-4 mx-4 mt-4">
+            ⚠️ Connected to remote backup server.
+            Dispense and robot operations are disabled remotely.
+          </div>
+        )}
         <AnimatePresence mode="wait">
           <motion.div
             key={view}
@@ -3869,7 +3879,7 @@ export const AdminShell = ({ onSwitchToKiosk, currentDoctor, onLogout }: { onSwi
             {view === 'shift' && <ShiftReportView dark={dark} />}
             {view === 'doctors' && <DoctorsView currentDoctor={currentDoctor} />}
             {view === 'audit' && <AuditLogView />}
-            {view === 'tech' && <TechView techStatus={techStatus} onRefresh={loadTech} currentDoctor={currentDoctor} />}
+            {view === 'tech' && isLocal && <TechView techStatus={techStatus} onRefresh={loadTech} currentDoctor={currentDoctor} />}
           </motion.div>
         </AnimatePresence>
       </main>
