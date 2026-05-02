@@ -23,8 +23,19 @@ export default defineConfig({
     tailwindcss(),
     react(),
   ],
+  build: {
+    rollupOptions: {
+      external: [
+        'net', 'tls', 'fs', 'path', 'os', 'crypto', 'stream',
+        'http', 'https', 'zlib', 'events', 'util', 'url',
+        'buffer', 'querystring', 'string_decoder', 'punycode',
+        'dns', 'dgram', 'child_process', 'cluster', 'module',
+        'readline', 'repl', 'vm', 'worker_threads',
+      ],
+    },
+  },
   server: {
-    host: true,           // expose sur 0.0.0.0 → accessible depuis téléphone/tablette
+    host: true,
     port: 3000,
     proxy: {
       '/api': {
