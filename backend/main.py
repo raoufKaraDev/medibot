@@ -1,11 +1,13 @@
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from config import settings
 from database import init_db
 from middleware import register_audit_middleware
 from mqtt import setup_mqtt_client
@@ -35,6 +37,27 @@ for _r in (
     pharmacy, audit, analytics, notifications, tech, interactions, vitals, lifecycle,
 ):
     app.include_router(_r.router)
+
+
+@app.get("/health", tags=["system"])
+async def health_check():
+    mqtt_connected = False
+    if settings.MQTT_ENABLED:
+        try:
+            from mqtt import _mqtt
+            mqtt_connected = bool(_mqtt and _mqtt.is_connected())
+        except Exception:
+            mqtt_connected = False
+
+    return {
+        "status": "ok",
+        "environment": str(settings.ENVIRONMENT),
+        "timestamp": datetime.utcnow().isoformat(),
+        "mqtt_enabled": settings.MQTT_ENABLED,
+        "mqtt_connected": mqtt_connected,
+        "version": "1.0.0"
+    }
+
 
 FRONTEND_DIST = Path("dist")
 
