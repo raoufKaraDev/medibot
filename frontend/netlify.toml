@@ -4,7 +4,18 @@
   command = "npm run build"
   publish = "dist"
 
-# Redirect all routes to index.html for React SPA routing
+[build.environment]
+  VITE_ENVIRONMENT   = "REMOTEBACKUP"
+  VITE_API_BASE_URL  = "https://medibot-dz.up.railway.app"
+
+# Proxy /api/* to Railway backend — MUST be before the SPA catch-all
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://medibot-dz.up.railway.app/api/:splat"
+  status = 200
+  force  = true
+
+# Redirect all other routes to index.html for React SPA routing
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
