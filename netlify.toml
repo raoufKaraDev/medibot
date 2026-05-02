@@ -1,0 +1,11 @@
+# Root-level netlify.toml — Netlify reads this first on git-triggered builds
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "frontend/dist"
+
+# React SPA: redirect all routes to index.html
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

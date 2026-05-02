@@ -1,0 +1,11 @@
+# Netlify deployment config for MediBot frontend (REMOTEBACKUP)
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+# Redirect all routes to index.html for React SPA routing
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
