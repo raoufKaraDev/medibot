@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -11,6 +12,8 @@ from config import settings
 from database import init_db
 from middleware import register_audit_middleware
 from mqtt import setup_mqtt_client
+from routers.sync import router as sync_router
+from sync.scheduler import run_sync_loop
 import mqtt as mqtt_mod
 from routers import (
     analytics, audit, auth, dispense, doctors, interactions, lifecycle, medications,
@@ -22,7 +25,9 @@ from routers import (
 async def lifespan(app: FastAPI):
     init_db()
     setup_mqtt_client()
+    sync_task = asyncio.create_task(run_sync_loop())
     yield
+    sync_task.cancel()
     if mqtt_mod._mqtt:
         mqtt_mod._mqtt.loop_stop()
         mqtt_mod._mqtt.disconnect()
@@ -37,6 +42,7 @@ for _r in (
     pharmacy, audit, analytics, notifications, tech, interactions, vitals, lifecycle,
 ):
     app.include_router(_r.router)
+app.include_router(sync_router)
 
 
 @app.get("/health", tags=["system"])
