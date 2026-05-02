@@ -15,20 +15,27 @@ from helpers import calc_dose_ml, hash_password, rows_to_list
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-DATABASE_URL = settings.DATABASE_URL
+DATABASE_URL = (settings.DATABASE_URL or "").strip()
 
-if IS_LOCAL:
-    engine = create_engine(
-        f"sqlite:///{DB_PATH}",
-        connect_args={"check_same_thread": False},
-    )
-else:
-    db_url = (
+# ── Engine selection ────────────────────────────────────────────────────────
+# Priority:
+#   1. If DATABASE_URL is a valid postgres URL → use PostgreSQL (psycopg2)
+#   2. Otherwise (missing, placeholder, or LOCALHOSPITAL) → use local SQLite
+_use_postgres = DATABASE_URL.startswith("postgresql") or DATABASE_URL.startswith("postgres")
+
+if _use_postgres:
+    _db_url = (
         DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
         if DATABASE_URL.startswith("postgresql://")
         else DATABASE_URL
     )
-    engine = create_engine(db_url)
+    engine = create_engine(_db_url)
+else:
+    # Fallback: SQLite — works for both LOCALHOSPITAL and REMOTEBACKUP without a DB
+    engine = create_engine(
+        f"sqlite:///{DB_PATH}",
+        connect_args={"check_same_thread": False},
+    )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
@@ -223,7 +230,7 @@ def _ensure_single_doctor(conn) -> None:
 
 
 def init_db():
-    if not IS_LOCAL:
+    if _use_postgres:
         Base.metadata.create_all(bind=engine)
         return
 
@@ -871,30 +878,8 @@ def init_db():
             c.execute(
                 ins_pat,
                 (
-                    fn,
-                    ln,
-                    age,
-                    w,
-                    bt,
-                    diag,
-                    rid,
-                    bed,
-                    allj,
-                    "",
-                    dn,
-                    gs,
-                    ga,
-                    rh,
-                    pC,
-                    pc,
-                    pE,
-                    pe,
-                    pK,
-                    pk,
-                    ant,
-                    te,
-                    drug_j,
-                    oth_j,
+                    fn, ln, age, w, bt, diag, rid, bed, allj, "",
+                    dn, gs, ga, rh, pC, pc, pE, pe, pK, pk, ant, te, drug_j, oth_j,
                 ),
             )
         guardians_seed = [
@@ -914,7 +899,6 @@ def init_db():
         conn.commit()
 
     # ── Catalogue médicaments / consommables (medicine.json) ou seed minimal ──
-    # Ne pas réimporter à chaque démarrage (efface meds/stock) : seulement si table vide ou FORCE_MEDICINE_JSON_IMPORT=1
     _mj = os.getenv("MEDICINE_JSON", "").strip()
     catalog_path = (
         Path(_mj)
@@ -959,23 +943,15 @@ def init_db():
                     s,
                 )
         try:
-            c.execute(
-                "UPDATE pharmacy_stock SET pediatric_mg_per_kg=40 WHERE drawer=1 AND pediatric_mg_per_kg IS NULL"
-            )
-            c.execute(
-                "UPDATE pharmacy_stock SET pediatric_mg_per_kg=15 WHERE drawer=2 AND pediatric_mg_per_kg IS NULL"
-            )
-            c.execute(
-                "UPDATE pharmacy_stock SET pediatric_mg_per_kg=35 WHERE drawer=4 AND pediatric_mg_per_kg IS NULL"
-            )
+            c.execute("UPDATE pharmacy_stock SET pediatric_mg_per_kg=40 WHERE drawer=1 AND pediatric_mg_per_kg IS NULL")
+            c.execute("UPDATE pharmacy_stock SET pediatric_mg_per_kg=15 WHERE drawer=2 AND pediatric_mg_per_kg IS NULL")
+            c.execute("UPDATE pharmacy_stock SET pediatric_mg_per_kg=35 WHERE drawer=4 AND pediatric_mg_per_kg IS NULL")
         except Exception:
             pass
         seed.seed_demo_prescriptions(c)
 
     try:
-        c.execute(
-            "UPDATE medications SET is_high_risk=1 WHERE lower(name) LIKE '%morphine%' OR lower(name) LIKE '%insulin%' OR lower(name) LIKE '%warfar%'"
-        )
+        c.execute("UPDATE medications SET is_high_risk=1 WHERE lower(name) LIKE '%morphine%' OR lower(name) LIKE '%insulin%' OR lower(name) LIKE '%warfar%'")
     except Exception:
         pass
 
@@ -995,16 +971,12 @@ def init_db():
                 )
 
     try:
-        c.execute(
-            "INSERT OR IGNORE INTO prescription_validation(patient_id,status) SELECT id,'approved' FROM patients"
-        )
+        c.execute("INSERT OR IGNORE INTO prescription_validation(patient_id,status) SELECT id,'approved' FROM patients")
     except Exception:
         pass
 
     try:
-        c.execute(
-            "UPDATE patients SET groupe_sanguin = blood_type WHERE groupe_sanguin IS NULL OR groupe_sanguin = ''"
-        )
+        c.execute("UPDATE patients SET groupe_sanguin = blood_type WHERE groupe_sanguin IS NULL OR groupe_sanguin = ''")
     except Exception:
         pass
 
@@ -1028,11 +1000,6 @@ def init_db():
         seed._seed_demo_audit_log(c)
     except Exception as ex:
         print(f"[init_db] seed audit_log: {ex}")
-    # Disabled: demo dispense_log entries cause confusion in analytics
-    # try:
-    #     seed._seed_demo_dispenselog(c)
-    # except Exception as ex:
-    #     print(f"[init_db] seed dispenselog: {ex}")
 
     med_meta = [
         (1, "Antibiotique", "LOT-AMX-2026-01", "500mg", 100.0, 500.0, 1),
