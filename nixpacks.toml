@@ -1,11 +1,2 @@
-[phases.setup]
-nixPkgs = ['nodejs_20', 'npm-9_x']
-
-[phases.install]
-cmds = ['cd frontend && npm ci']
-
-[phases.build]
-cmds = ['cd frontend && npm run build']
-
-[start]
-cmd = 'npx --yes serve frontend/dist -l $PORT -s'
+# This file is intentionally empty.
+# Railway uses Railpack (not Nixpacks) — auto-detection handles Node.js.
