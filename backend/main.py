@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from config import settings
+from config import IS_LOCAL, settings
 from database import init_db
 from middleware import register_audit_middleware
 from mqtt import setup_mqtt_client
@@ -24,11 +24,15 @@ from routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    setup_mqtt_client()
-    sync_task = asyncio.create_task(run_sync_loop())
+    if IS_LOCAL:
+        setup_mqtt_client()
+        sync_task = asyncio.create_task(run_sync_loop())
+    else:
+        sync_task = None
     yield
-    sync_task.cancel()
-    if mqtt_mod._mqtt:
+    if sync_task:
+        sync_task.cancel()
+    if IS_LOCAL and mqtt_mod._mqtt:
         mqtt_mod._mqtt.loop_stop()
         mqtt_mod._mqtt.disconnect()
 
