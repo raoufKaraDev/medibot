@@ -17,18 +17,41 @@ export default defineConfig({
       '@hooks': path.resolve(__dirname, './src/shared/hooks'),
       '@context': path.resolve(__dirname, './src/shared/context'),
       '@/context': path.resolve(__dirname, './src/shared/context'),
-      // Force Vite/Rollup to use the browser-safe mqtt build (no Node.js built-ins)
-      'mqtt': 'mqtt/dist/mqtt.esm.js',
     },
   },
-  plugins: [
-    tailwindcss(),
-    react(),
-  ],
+  optimizeDeps: {
+    // Tell Vite's pre-bundler to use the browser ESM entry of mqtt v5
+    include: ['mqtt'],
+    esbuildOptions: {
+      define: {
+        // mqtt v5 checks for process.env.NODE_ENV internally
+        'process.env.NODE_ENV': JSON.stringify('production'),
+      },
+      plugins: [
+        {
+          name: 'mqtt-browser',
+          setup(build) {
+            // Redirect any import of 'mqtt' to its browser ESM build
+            build.onResolve({ filter: /^mqtt$/ }, () => ({
+              path: require.resolve('mqtt/dist/mqtt.esm-browser.js'),
+            }))
+          },
+        },
+      ],
+    },
+  },
   build: {
     rollupOptions: {
-      // Removed: externalizing Node.js built-ins was wrong — mqtt/dist/mqtt.esm.js
-      // is self-contained and does not need them. Externalizing caused runtime errors.
+      plugins: [
+        {
+          name: 'mqtt-browser-rollup',
+          resolveId(id) {
+            if (id === 'mqtt') {
+              return { id: 'mqtt/dist/mqtt.esm-browser.js' }
+            }
+          },
+        },
+      ],
     },
   },
   server: {
