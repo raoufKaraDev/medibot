@@ -17,6 +17,8 @@ export default defineConfig({
       '@hooks': path.resolve(__dirname, './src/shared/hooks'),
       '@context': path.resolve(__dirname, './src/shared/context'),
       '@/context': path.resolve(__dirname, './src/shared/context'),
+      // Force Vite/Rollup to use the browser-safe mqtt build (no Node.js built-ins)
+      'mqtt': 'mqtt/dist/mqtt.esm.js',
     },
   },
   plugins: [
@@ -25,13 +27,8 @@ export default defineConfig({
   ],
   build: {
     rollupOptions: {
-      external: [
-        'net', 'tls', 'fs', 'path', 'os', 'crypto', 'stream',
-        'http', 'https', 'zlib', 'events', 'util', 'url',
-        'buffer', 'querystring', 'string_decoder', 'punycode',
-        'dns', 'dgram', 'child_process', 'cluster', 'module',
-        'readline', 'repl', 'vm', 'worker_threads',
-      ],
+      // Removed: externalizing Node.js built-ins was wrong — mqtt/dist/mqtt.esm.js
+      // is self-contained and does not need them. Externalizing caused runtime errors.
     },
   },
   server: {
