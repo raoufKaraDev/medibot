@@ -1,0 +1,33 @@
+.env.local
+.env.remote
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Android
+android-kiosk/.gradle/
+android-kiosk/app/build/
+android-kiosk/build/
+*.jks
+local.properties
+
+# Database
+backend/medibot.db
+backend/patients.db
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
