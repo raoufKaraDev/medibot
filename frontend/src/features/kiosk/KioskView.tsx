@@ -1791,12 +1791,6 @@ export default function KioskView({ onSwitchToAdmin }: Props) {
             className="w-9 h-9 rounded-lg flex items-center justify-center border border-gray-200 text-gray-500 hover:text-teal-600 hover:border-teal-400 transition-all">
             {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
-          {onSwitchToAdmin && (
-            <button onClick={onSwitchToAdmin}
-              className="text-xs text-gray-500 hover:text-gray-700 transition-colors px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-400">
-              Administration
-            </button>
-          )}
         </div>
       </div>
 
