@@ -1,83 +1,67 @@
-import asyncio
 import os
-from contextlib import asynccontextmanager
-from datetime import datetime
-from pathlib import Path
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 
-from config import IS_LOCAL, settings
 from database import init_db
-from middleware import register_audit_middleware
-from mqtt import setup_mqtt_client
-from routers.sync import router as sync_router
-from sync.scheduler import run_sync_loop
-import mqtt as mqtt_mod
 from routers import (
-    analytics, audit, auth, dispense, doctors, interactions, lifecycle, medications,
-    notifications, patients, pharmacy, prescriptions, rooms, tech, vitals,
+    patients, rooms, medications, dispenses,
+    auth, doctors, stats, pharmacy, tech,
+    audit, prescriptions, vitals, interactions,
+    shift, photoUpload
 )
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    if IS_LOCAL:
-        setup_mqtt_client()
-        sync_task = asyncio.create_task(run_sync_loop())
-    else:
-        sync_task = None
     yield
-    if sync_task:
-        sync_task.cancel()
-    if IS_LOCAL and mqtt_mod._mqtt:
-        mqtt_mod._mqtt.loop_stop()
-        mqtt_mod._mqtt.disconnect()
 
+app = FastAPI(
+    title="MediBot API",
+    description="Syst\u00e8me de distribution automatis\u00e9 de m\u00e9dicaments — H\u00f4pital de Rou\u00efba",
+    version="2.0.0",
+    lifespan=lifespan
+)
 
-app = FastAPI(title="MediBot API", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-register_audit_middleware(app)
+# ── CORS ──────────────────────────────────────────────────────────────
+# On LAN: allow all (laptop + tablet on same network)
+# On Railway demo: allow Vercel frontend URL via env var
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = [o.strip() for o in allowed_origins_env.split(",") if o.strip()]
+else:
+    allowed_origins = ["*"]
 
-for _r in (
-    auth, patients, doctors, rooms, medications, prescriptions, dispense,
-    pharmacy, audit, analytics, notifications, tech, interactions, vitals, lifecycle,
-):
-    app.include_router(_r.router)
-app.include_router(sync_router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
+# ── Routers ───────────────────────────────────────────────────────────
+app.include_router(auth.router,          prefix="/api/auth",         tags=["auth"])
+app.include_router(patients.router,      prefix="/api/patients",     tags=["patients"])
+app.include_router(rooms.router,         prefix="/api/rooms",        tags=["rooms"])
+app.include_router(medications.router,   prefix="/api/medications",  tags=["medications"])
+app.include_router(dispenses.router,     prefix="/api/dispenses",    tags=["dispenses"])
+app.include_router(doctors.router,       prefix="/api/doctors",      tags=["doctors"])
+app.include_router(stats.router,         prefix="/api/stats",        tags=["stats"])
+app.include_router(pharmacy.router,      prefix="/api/pharmacy",     tags=["pharmacy"])
+app.include_router(tech.router,          prefix="/api/tech",         tags=["tech"])
+app.include_router(audit.router,         prefix="/api/audit",        tags=["audit"])
+app.include_router(prescriptions.router, prefix="/api",              tags=["prescriptions"])
+app.include_router(vitals.router,        prefix="/api/vitals",       tags=["vitals"])
+app.include_router(interactions.router,  prefix="/api/interactions", tags=["interactions"])
+app.include_router(shift.router,         prefix="/api/shift",        tags=["shift"])
+app.include_router(photoUpload.router,   prefix="/api",              tags=["photos"])
 
-@app.get("/health", tags=["system"])
-async def health_check():
-    mqtt_connected = False
-    if settings.MQTT_ENABLED:
-        try:
-            from mqtt import _mqtt
-            mqtt_connected = bool(_mqtt and _mqtt.is_connected())
-        except Exception:
-            mqtt_connected = False
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "MediBot API", "version": "2.0.0"}
 
-    return {
-        "status": "ok",
-        "environment": str(settings.ENVIRONMENT),
-        "timestamp": datetime.utcnow().isoformat(),
-        "mqtt_enabled": settings.MQTT_ENABLED,
-        "mqtt_connected": mqtt_connected,
-        "version": "1.0.0"
-    }
-
-
-FRONTEND_DIST = Path("dist")
-
-if FRONTEND_DIST.exists():
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str):
-        file_path = FRONTEND_DIST / full_path
-        if full_path and file_path.is_file():
-            return FileResponse(file_path)
-        index_file = FRONTEND_DIST / "index.html"
-        if index_file.is_file():
-            return FileResponse(index_file)
-        raise HTTPException(status_code=404, detail="Frontend build not found")
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
