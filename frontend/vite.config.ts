@@ -19,35 +19,14 @@ export default defineConfig({
       '@/context': path.resolve(__dirname, './src/shared/context'),
     },
   },
-  optimizeDeps: {
-    // Tell Vite's pre-bundler to use the browser ESM entry of mqtt v5
-    include: ['mqtt'],
-    esbuildOptions: {
-      define: {
-        // mqtt v5 checks for process.env.NODE_ENV internally
-        'process.env.NODE_ENV': JSON.stringify('production'),
-      },
-      plugins: [
-        {
-          name: 'mqtt-browser',
-          setup(build) {
-            // Redirect any import of 'mqtt' to its browser ESM build
-            build.onResolve({ filter: /^mqtt$/ }, () => ({
-              path: require.resolve('mqtt/dist/mqtt.esm-browser.js'),
-            }))
-          },
-        },
-      ],
-    },
-  },
   build: {
     rollupOptions: {
       plugins: [
         {
           name: 'mqtt-browser-rollup',
-          resolveId(id) {
+          resolveId(id: string) {
             if (id === 'mqtt') {
-              return { id: 'mqtt/dist/mqtt.esm-browser.js' }
+              return { id: 'mqtt/dist/mqtt.esm.js' }
             }
           },
         },
