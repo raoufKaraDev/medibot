@@ -26,16 +26,12 @@ class Settings:
     )
 
     # Database Configuration
-    if EnvironmentType(os.getenv("MEDIBOT_ENVIRONMENT", "LOCALHOSPITAL")) \
-       == EnvironmentType.LOCALHOSPITAL:
-        DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./medibot.db")
-        DB_PATH: str = os.getenv("DB_PATH", "./medibot.db")
-    else:
-        DATABASE_URL: str = os.getenv(
-            "DATABASE_URL",
-            "postgresql://user:pass@host:5432/medibotbackup"
-        )
-        DB_PATH: str = ""
+    # Always read DATABASE_URL from the environment.
+    # - If it starts with 'postgresql' -> use PostgreSQL (set by Railway or admin)
+    # - If missing or empty           -> fall back to SQLite (safe default for both envs)
+    _raw_db_url: str = os.getenv("DATABASE_URL", "").strip()
+    DATABASE_URL: str = _raw_db_url if _raw_db_url.startswith("postgresql") or _raw_db_url.startswith("postgres") else "sqlite:///./medibot.db"
+    DB_PATH: str = os.getenv("DB_PATH", "./medibot.db") if not (_raw_db_url.startswith("postgresql") or _raw_db_url.startswith("postgres")) else ""
 
     # MQTT Configuration (local only)
     MQTT_ENABLED: bool = (
