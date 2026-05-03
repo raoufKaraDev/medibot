@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { ThemeProvider } from '@/shared/context/ThemeContext';
 import KioskView from '@/features/kiosk/KioskView';
-import { AdminShell, LoginView } from '@/features/admin/AdminShell';
+import AdminShell, { LoginView } from '@/features/admin/AdminShell';
 import type { Doctor } from '@/shared/types';
 
 export default function App() {
