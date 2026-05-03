@@ -26,6 +26,10 @@ class Settings:
     )
 
     # Database Configuration
+    # REMOTEBACKUP uses /tmp/medibot.db — writable on Railway, shared across
+    # all get_db() calls within the same process lifetime.
+    # NOTE: /tmp is ephemeral on Railway restarts — that is acceptable for the
+    # remote backup role (data is received via sync push from the local server).
     if EnvironmentType(os.getenv("MEDIBOT_ENVIRONMENT", "LOCALHOSPITAL")) \
        == EnvironmentType.LOCALHOSPITAL:
         DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./medibot.db")
@@ -33,9 +37,9 @@ class Settings:
     else:
         DATABASE_URL: str = os.getenv(
             "DATABASE_URL",
-            "postgresql://user:pass@host:5432/medibotbackup"
+            "sqlite:////tmp/medibot.db"
         )
-        DB_PATH: str = ""
+        DB_PATH: str = os.getenv("DB_PATH", "/tmp/medibot.db")
 
     # MQTT Configuration (local only)
     MQTT_ENABLED: bool = (
@@ -55,12 +59,12 @@ class Settings:
                 == EnvironmentType.LOCALHOSPITAL else "REMOTESTRONG"
     )
 
-    # CORS
+    # CORS — allow all origins on Railway so the Vercel frontend can reach it
     CORS_ORIGINS: list = (
         ["http://localhost", "http://127.0.0.1", "http://192.168.1."]
         if EnvironmentType(os.getenv("MEDIBOT_ENVIRONMENT", "LOCALHOSPITAL"))
            == EnvironmentType.LOCALHOSPITAL
-        else ["https://medibot-backup.example.com"]
+        else ["*"]
     )
 
     # Sync / Backup
@@ -85,7 +89,7 @@ class Settings:
         "./logs/audit.log"
         if EnvironmentType(os.getenv("MEDIBOT_ENVIRONMENT", "LOCALHOSPITAL"))
            == EnvironmentType.LOCALHOSPITAL
-        else "/var/log/medibot/audit.log"
+        else "/tmp/medibot_audit.log"
     )
 
 
