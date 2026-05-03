@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -18,6 +19,26 @@ from routers import (
     analytics, audit, auth, dispense, doctors, interactions, lifecycle, medications,
     notifications, patients, pharmacy, prescriptions, rooms, tech, vitals,
 )
+
+# ── Logging ─────────────────────────────────────────────────────────────────
+# Must be configured BEFORE uvicorn touches the root logger.
+# uvicorn sets propagate=False on its own loggers, which would silently drop
+# our medibot.sync.* messages. We re-attach a StreamHandler to preserve them.
+_log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
+
+logging.basicConfig(
+    level=_log_level,
+    format="%(asctime)s  %(name)-30s  %(levelname)-8s  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    force=True,   # override any previous config (including uvicorn's)
+)
+
+# Ensure medibot namespace always visible regardless of uvicorn log config
+logging.getLogger("medibot").setLevel(_log_level)
+# Keep third-party loggers quiet unless DEBUG
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+# ────────────────────────────────────────────────────────────────────────────
 
 
 @asynccontextmanager
