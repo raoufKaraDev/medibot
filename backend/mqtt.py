@@ -5,7 +5,7 @@ from typing import Any
 import os
 import paho.mqtt.client as mqttclient
 
-from config import MQTT_HOST, MQTT_PORT, TOPIC_CMD
+from config import MQTT_HOST, MQTT_PORT, TOPIC_CMD, settings
 from database import get_db
 _mqtt_client = None
 robot_state: dict[str, Any] = {
@@ -66,7 +66,11 @@ def mqtt_on_connect(client, userdata, flags, reason_code, properties=None):
 
 
 def setup_mqtt_client():
+    """Connect to the local MQTT broker. Only call this when MQTT_ENABLED is True."""
     global _mqtt
+    if not settings.MQTT_ENABLED:
+        print("[MQTT] Disabled in this environment — skipping connection.")
+        return None
     if _mqtt and _mqtt.is_connected():
         return _mqtt
     c = mqttclient.Client(mqttclient.CallbackAPIVersion.VERSION2, client_id=f"medibot-backend-{os.getpid()}")
@@ -89,6 +93,9 @@ def get_mqtt():
 
 
 def mqtt_publish(payload: dict) -> bool:
+    if not settings.MQTT_ENABLED:
+        print("[MQTT] Publish skipped — MQTT disabled.")
+        return False
     try:
         r = get_mqtt().publish(TOPIC_CMD, json.dumps(payload, ensure_ascii=False), qos=1)
         r.wait_for_publish(timeout=5.0)

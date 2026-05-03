@@ -3,6 +3,12 @@
   buildCommand = "pip install -r requirements.txt"
 
 [deploy]
+  # MEDIBOT_ENVIRONMENT must be set to REMOTEBACKUP in the Railway dashboard
+  # for the backend to behave as a cloud backup (no MQTT, SQLite ephemeral OK).
   startCommand = "uvicorn main:app --host 0.0.0.0 --port $PORT"
   restartPolicyType = "on_failure"
   restartPolicyMaxRetries = 3
+
+[env]
+  MEDIBOT_ENVIRONMENT = "REMOTEBACKUP"
+  MQTT_ENABLED = "false"

@@ -11,7 +11,6 @@ from fastapi.responses import FileResponse
 from config import settings
 from database import init_db
 from middleware import register_audit_middleware
-from mqtt import setup_mqtt_client
 from routers.sync import router as sync_router
 from sync.scheduler import run_sync_loop
 import mqtt as mqtt_mod
@@ -24,13 +23,19 @@ from routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    setup_mqtt_client()
+    # Only start MQTT and sync loop in LOCAL hospital mode
+    if settings.MQTT_ENABLED:
+        from mqtt import setup_mqtt_client
+        setup_mqtt_client()
     sync_task = asyncio.create_task(run_sync_loop())
     yield
     sync_task.cancel()
     if mqtt_mod._mqtt:
-        mqtt_mod._mqtt.loop_stop()
-        mqtt_mod._mqtt.disconnect()
+        try:
+            mqtt_mod._mqtt.loop_stop()
+            mqtt_mod._mqtt.disconnect()
+        except Exception:
+            pass
 
 
 app = FastAPI(title="MediBot API", lifespan=lifespan)
@@ -65,6 +70,8 @@ async def health_check():
     }
 
 
+# Only serve the SPA if a dist/ folder actually exists (local dev with bundled frontend).
+# On Railway (pure backend), dist/ does not exist so this block is skipped entirely.
 FRONTEND_DIST = Path("dist")
 
 if FRONTEND_DIST.exists():
