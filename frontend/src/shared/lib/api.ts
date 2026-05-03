@@ -1,8 +1,44 @@
 import appConfig from './config';
 
+/** Read the logged-in doctor from localStorage (set by login flow in App.tsx). */
+function getAuthHeaders(): Record<string, string> {
+  try {
+    // Try common storage keys used by the admin login
+    const raw =
+      localStorage.getItem('medibot_doctor') ||
+      localStorage.getItem('doctor') ||
+      localStorage.getItem('user');
+    if (raw) {
+      const doc = JSON.parse(raw);
+      const id = doc?.id ?? doc?.doctor_id ?? doc?.userId ?? '';
+      const name = doc?.name ?? doc?.username ?? '';
+      const role = doc?.role ?? '';
+      if (id) {
+        return {
+          'X-Medibot-Doctor-Id': String(id),
+          'X-Medibot-User-Id':   String(id),
+          'X-Medibot-User-Name': name,
+          'X-Medibot-User-Role': role,
+        };
+      }
+    }
+  } catch {
+    // localStorage unavailable (SSR / private mode) — ignore
+  }
+  return {};
+}
+
 /** Typed JSON fetch helper used across admin views and extras. */
 export const api = async (path: string, opts?: RequestInit) => {
-  const r = await fetch(`${appConfig.apiBaseUrl}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  const authHeaders = getAuthHeaders();
+  const r = await fetch(`${appConfig.apiBaseUrl}${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,          // inject auth on every request
+      ...(opts?.headers ?? {}), // caller headers take final priority
+    },
+  });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 };
@@ -19,15 +55,12 @@ function parseWeightToNumber(weight: any): number {
 
 /**
  * Normalize patient data from backend field names to frontend field names.
- * Backend: first_name, last_name, weight_kg, room_id, bed, date_naissance, drug_allergies, etc.
- * Frontend: nom, prenom, poids, chambre_id, lit, ddn, allergie_medicaments, etc.
  */
 export function normalizePatient(p: any) {
   if (!p) return p;
   const weightNum = parseWeightToNumber(p.weight_kg ?? p.poids ?? p.weight ?? 0);
   return {
     ...p,
-    // Map backend names to frontend names (with fallback to existing names)
     nom: p.last_name ?? p.nom ?? '',
     prenom: p.first_name ?? p.prenom ?? '',
     poids: weightNum,
@@ -38,7 +71,6 @@ export function normalizePatient(p: any) {
     autres_allergies: p.other_allergies ?? p.autres_allergies ?? [],
     vaccinations: Array.isArray(p.vaccinations) ? p.vaccinations : [],
     tuteur: p.guardian ?? p.tuteur ?? null,
-    // Keep original fields as well for compatibility
     first_name: p.first_name ?? p.prenom ?? '',
     last_name: p.last_name ?? p.nom ?? '',
     weight_kg: weightNum,
@@ -51,9 +83,7 @@ export function normalizePatient(p: any) {
   };
 }
 
-/**
- * Normalize an array of patients.
- */
+/** Normalize an array of patients. */
 export function normalizePatients(patients: any[]) {
   return (patients || []).map(normalizePatient);
 }
