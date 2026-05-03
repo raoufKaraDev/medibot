@@ -14,6 +14,7 @@ logger = logging.getLogger("medibot.sync.scheduler")
 
 RETRY_INTERVALS = [60, 300, 1800, 3600, 86400]
 SYNC_INTERVAL_SECONDS = 300  # 5 minutes
+STARTUP_DELAY_SECONDS = 30   # wait for FastAPI to fully boot before first sync
 
 
 def _get_last_sync_time() -> datetime:
@@ -74,11 +75,16 @@ def _update_sync_metadata(
 async def run_sync_loop() -> None:
     """
     Main sync loop. Only runs if SYNC_ENABLED and IS_LOCAL.
+    Waits for FastAPI startup to complete before first attempt.
     Runs every 5 minutes with exponential backoff on failure.
     """
     if not SYNC_ENABLED or not IS_LOCAL:
         logger.info("Sync disabled or not LOCAL — sync loop not started")
         return
+
+    # Let FastAPI fully start before touching the network
+    logger.info(f"Sync loop: waiting {STARTUP_DELAY_SECONDS}s for server startup...")
+    await asyncio.sleep(STARTUP_DELAY_SECONDS)
 
     detector = ChangeDetector()
     builder = SyncPayloadBuilder()
@@ -90,12 +96,10 @@ async def run_sync_loop() -> None:
     while True:
         sleep_seconds = SYNC_INTERVAL_SECONDS
         try:
-            # First flush any queued retries
             flushed = sender.flush_retry_queue()
             if flushed:
                 logger.info(f"Flushed {flushed} queued sync payloads")
 
-            # Detect and send new changes
             since = _get_last_sync_time()
             changes = detector.detect_changes(since)
             total_records = sum(
@@ -117,15 +121,12 @@ async def run_sync_loop() -> None:
                         retry_count=0,
                         records_sent=total_records,
                     )
-                    logger.info(
-                        f"Sync complete: {total_records} records sent"
-                    )
+                    logger.info(f"Sync complete: {total_records} records sent")
                 else:
                     retry_count += 1
                     if retry_count >= len(RETRY_INTERVALS):
                         logger.error(
-                            "Sync offline for 1 day — "
-                            "manual intervention required"
+                            "Sync offline for 1 day — manual intervention required"
                         )
                         retry_count = len(RETRY_INTERVALS) - 1
                     sleep_seconds = RETRY_INTERVALS[retry_count]
