@@ -1,5 +1,10 @@
 """
 SyncScheduler — runs sync every 5 minutes with exponential backoff retry.
+
+CRITICAL: sender.send_sync() and flush_retry_queue() use the synchronous
+`requests` library which BLOCKS the event loop if called directly in a
+coroutine. All blocking calls are wrapped with asyncio.to_thread() so
+FastAPI remains fully responsive at all times.
 """
 import asyncio
 import logging
@@ -14,16 +19,14 @@ logger = logging.getLogger("medibot.sync.scheduler")
 
 RETRY_INTERVALS = [60, 300, 1800, 3600, 86400]
 SYNC_INTERVAL_SECONDS = 300  # 5 minutes
-STARTUP_DELAY_SECONDS = 30   # wait for FastAPI to fully boot before first sync
+STARTUP_DELAY_SECONDS = 30   # let FastAPI fully boot first
 
 
 def _get_last_sync_time() -> datetime:
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT last_successful_sync FROM sync_metadata LIMIT 1"
-        )
+        cursor.execute("SELECT last_successful_sync FROM sync_metadata LIMIT 1")
         row = cursor.fetchone()
         conn.close()
         if row and row[0]:
@@ -72,17 +75,37 @@ def _update_sync_metadata(
         logger.error(f"Failed to update sync metadata: {e}")
 
 
+def _run_sync_cycle(sender: SyncSender, detector: ChangeDetector, builder: SyncPayloadBuilder):
+    """Blocking sync work — runs in a thread via asyncio.to_thread."""
+    flushed = sender.flush_retry_queue()
+    if flushed:
+        logger.info(f"Flushed {flushed} queued sync payloads")
+
+    since = _get_last_sync_time()
+    changes = detector.detect_changes(since)
+    total_records = sum(
+        len(v["records"]) if isinstance(v, dict) else len(v)
+        for v in changes.values()
+    )
+
+    if total_records == 0:
+        logger.debug("No changes to sync")
+        return True, 0
+
+    payload = builder.build_payload(changes)
+    success = sender.send_sync(payload)
+    return success, total_records
+
+
 async def run_sync_loop() -> None:
     """
-    Main sync loop. Only runs if SYNC_ENABLED and IS_LOCAL.
-    Waits for FastAPI startup to complete before first attempt.
-    Runs every 5 minutes with exponential backoff on failure.
+    Main sync loop. Blocking HTTP calls run in asyncio.to_thread()
+    so they never freeze the FastAPI event loop.
     """
     if not SYNC_ENABLED or not IS_LOCAL:
         logger.info("Sync disabled or not LOCAL — sync loop not started")
         return
 
-    # Let FastAPI fully start before touching the network
     logger.info(f"Sync loop: waiting {STARTUP_DELAY_SECONDS}s for server startup...")
     await asyncio.sleep(STARTUP_DELAY_SECONDS)
 
@@ -96,40 +119,27 @@ async def run_sync_loop() -> None:
     while True:
         sleep_seconds = SYNC_INTERVAL_SECONDS
         try:
-            flushed = sender.flush_retry_queue()
-            if flushed:
-                logger.info(f"Flushed {flushed} queued sync payloads")
-
-            since = _get_last_sync_time()
-            changes = detector.detect_changes(since)
-            total_records = sum(
-                len(v["records"]) if isinstance(v, dict) else len(v)
-                for v in changes.values()
+            # Run all blocking work in a thread — event loop stays free
+            success, total_records = await asyncio.to_thread(
+                _run_sync_cycle, sender, detector, builder
             )
 
             if total_records == 0:
-                logger.debug("No changes to sync")
                 retry_count = 0
+            elif success:
+                retry_count = 0
+                _update_sync_metadata(
+                    last_sync=datetime.utcnow(),
+                    retry_count=0,
+                    records_sent=total_records,
+                )
+                logger.info(f"Sync complete: {total_records} records sent")
             else:
-                payload = builder.build_payload(changes)
-                success = sender.send_sync(payload)
-
-                if success:
-                    retry_count = 0
-                    _update_sync_metadata(
-                        last_sync=datetime.utcnow(),
-                        retry_count=0,
-                        records_sent=total_records,
-                    )
-                    logger.info(f"Sync complete: {total_records} records sent")
-                else:
-                    retry_count += 1
-                    if retry_count >= len(RETRY_INTERVALS):
-                        logger.error(
-                            "Sync offline for 1 day — manual intervention required"
-                        )
-                        retry_count = len(RETRY_INTERVALS) - 1
-                    sleep_seconds = RETRY_INTERVALS[retry_count]
+                retry_count += 1
+                if retry_count >= len(RETRY_INTERVALS):
+                    logger.error("Sync offline for 1 day — manual intervention required")
+                    retry_count = len(RETRY_INTERVALS) - 1
+                sleep_seconds = RETRY_INTERVALS[retry_count]
 
         except Exception as e:
             logger.error(f"Sync loop error: {e}")
