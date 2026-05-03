@@ -5,23 +5,25 @@ import sqlite3
 from datetime import datetime
 from config import DB_PATH
 
+# Correct table names matching the actual SQLite schema
 SYNC_TABLES = [
-    "audit_logs",
-    "dispensing_events",
+    "audit_log",
+    "dispense_log",
     "patients",
     "prescriptions",
     "medications",
-    "stock_levels",
+    "pharmacy_stock",
     "doctors",
+    "rooms",
+    "guardians",
 ]
 
 # Tables that are always full snapshot (no timestamp filtering)
-SNAPSHOT_TABLES = {"stock_levels", "medications"}
+SNAPSHOT_TABLES = {"pharmacy_stock", "medications", "rooms", "doctors"}
 
-# WARNING: Never sync these fields — security sensitive
+# WARNING: Never sync RFID raw codes — but hashes ARE needed for login
 EXCLUDED_FIELDS = {
-    "doctors": {"password_hash", "rfid_hash", "pin_hash",
-                "password", "rfid_code", "pin_code"},
+    "doctors": {"rfid_code", "pin_code"},  # keep password_hash, pin_hash, rfid_uid
 }
 
 
@@ -40,7 +42,8 @@ class ChangeDetector:
         try:
             for table in SYNC_TABLES:
                 rows = self._query_table(conn, table, since)
-                changes[table] = rows
+                if rows:  # only include tables that have data
+                    changes[table] = rows
         finally:
             conn.close()
         return changes
@@ -51,11 +54,10 @@ class ChangeDetector:
         cursor = conn.cursor()
         excluded = EXCLUDED_FIELDS.get(table, set())
         try:
-            # Get column names
             cursor.execute(f"PRAGMA table_info({table})")
             all_cols = [row["name"] for row in cursor.fetchall()]
             if not all_cols:
-                return []  # Table does not exist yet
+                return []  # Table does not exist
 
             safe_cols = [c for c in all_cols if c not in excluded]
             col_select = ", ".join(safe_cols)
@@ -63,14 +65,16 @@ class ChangeDetector:
             if table in SNAPSHOT_TABLES:
                 cursor.execute(f"SELECT {col_select} FROM {table}")
             else:
-                # Filter by updated_at or created_at
-                ts_col = "updated_at" if "updated_at" in all_cols \
-                    else "created_at" if "created_at" in all_cols \
+                ts_col = (
+                    "updated_at" if "updated_at" in all_cols
+                    else "createdat" if "createdat" in all_cols
+                    else "created_at" if "created_at" in all_cols
+                    else "timestamp" if "timestamp" in all_cols
                     else None
+                )
                 if ts_col:
                     cursor.execute(
-                        f"SELECT {col_select} FROM {table} "
-                        f"WHERE {ts_col} > ?",
+                        f"SELECT {col_select} FROM {table} WHERE {ts_col} > ?",
                         (since.isoformat(),)
                     )
                 else:
