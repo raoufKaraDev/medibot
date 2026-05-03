@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import requests
 from datetime import datetime
 from config import BACKUP_URL, BACKUP_API_KEY, SYNC_RETRY_ATTEMPTS
 
@@ -18,7 +19,7 @@ MAX_WARN_COUNT = 3
 def _recompute_checksum(payload: dict) -> dict:
     """
     Recompute checksum from the final serialized domains dict.
-    This ensures sender and receiver use the exact same bytes.
+    Ensures sender and receiver hash the exact same bytes.
     """
     domains_json = json.dumps(payload["domains"], sort_keys=True, default=str)
     payload["checksum"] = hashlib.sha256(domains_json.encode()).hexdigest()
@@ -28,66 +29,75 @@ def _recompute_checksum(payload: dict) -> dict:
 class SyncSender:
     def __init__(self):
         self.remote_url = f"{BACKUP_URL}/api/sync/push"
-        self.timeout = 15  # increased: Railway cold starts can be slow
+        self.timeout = 15
         self._consecutive_failures = 0
 
     def send_sync(self, payload: dict) -> bool:
         """Send payload to remote. Returns True if successful."""
-        import requests
-
         if self._consecutive_failures >= MAX_WARN_COUNT:
             logger.debug("Sync skipped: still offline (silent mode)")
             self._queue_for_retry(payload)
             return False
 
-        # Recompute checksum from final payload to guarantee match
         payload = _recompute_checksum(dict(payload))
+        body = json.dumps(payload, default=str)
 
         try:
-            headers = {"Content-Type": "application/json"}
+            headers = {
+                "Content-Type": "application/json",
+            }
             if BACKUP_API_KEY:
                 headers["X-Sync-Key"] = BACKUP_API_KEY
 
             response = requests.post(
                 self.remote_url,
-                data=json.dumps(payload, default=str),  # use data= not json= to control serialization
+                data=body,
                 timeout=self.timeout,
                 headers=headers,
                 verify=True,
             )
             response.raise_for_status()
             self._consecutive_failures = 0
-            logger.info(f"Sync successful: {payload.get('sync_id')}")
+            logger.info(f"Sync successful: {payload.get('sync_id')} "
+                        f"({response.status_code})")
             return True
 
-        except requests.exceptions.ConnectionError:
+        except requests.exceptions.SSLError as e:
+            self._consecutive_failures += 1
+            logger.error(f"Sync SSL error: {e}")
+            self._queue_for_retry(payload)
+            return False
+        except requests.exceptions.ConnectionError as e:
             self._consecutive_failures += 1
             logger.warning(
-                f"Sync failed: no internet — queuing for retry "
-                f"({self._consecutive_failures}/{MAX_WARN_COUNT})"
+                f"Sync failed: connection error ({self._consecutive_failures}/{MAX_WARN_COUNT}): {e}"
             )
             self._queue_for_retry(payload)
             return False
         except requests.exceptions.Timeout:
             self._consecutive_failures += 1
             logger.warning(
-                f"Sync failed: timeout — queuing for retry "
+                f"Sync failed: timeout — queuing "
                 f"({self._consecutive_failures}/{MAX_WARN_COUNT})"
             )
             self._queue_for_retry(payload)
             return False
         except requests.exceptions.HTTPError as e:
-            status = e.response.status_code if e.response else 0
-            body = e.response.text if e.response else ""
+            status = e.response.status_code if e.response is not None else 0
+            body_text = e.response.text if e.response is not None else ""
+            logger.error(
+                f"Sync HTTP error {status}: {body_text} | "
+                f"exception type: {type(e).__name__} | msg: {e}"
+            )
             if status == 400:
-                logger.error(f"Sync rejected by remote (400): {body}")
-                return False
+                return False  # schema error, don't retry
             self._consecutive_failures += 1
-            logger.warning(f"Sync failed HTTP {status} — queuing for retry. Detail: {body}")
             self._queue_for_retry(payload)
             return False
         except Exception as e:
-            logger.error(f"Sync unexpected error: {e}")
+            logger.error(
+                f"Sync unexpected error [{type(e).__name__}]: {e}"
+            )
             self._queue_for_retry(payload)
             return False
 
