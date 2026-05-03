@@ -42,20 +42,37 @@ router = APIRouter()
 def get_stats():
     conn = get_db()
     try:
+        total_patients = conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0]
+        alert_patients = conn.execute(
+            "SELECT COUNT(*) FROM patients WHERE "
+            "(drug_allergies IS NOT NULL AND drug_allergies != '[]') "
+            "OR (other_allergies IS NOT NULL AND other_allergies != '[]')"
+        ).fetchone()[0]
+        # Only count active (non-suspended) doctors
+        total_doctors = conn.execute(
+            "SELECT COUNT(*) FROM doctors WHERE UPPER(COALESCE(status,'ACTIVE')) != 'SUSPENDED'"
+        ).fetchone()[0]
+        dispenses_today = conn.execute(
+            "SELECT COUNT(*) FROM dispense_log WHERE date(timestamp)=date('now')"
+        ).fetchone()[0]
+        total_dispenses = conn.execute("SELECT COUNT(*) FROM dispense_log").fetchone()[0]
+        rooms_occupied = conn.execute(
+            "SELECT COUNT(DISTINCT room_id) FROM patients"
+        ).fetchone()[0]
         return {
-            "total_patients":  conn.execute("SELECT COUNT(*) FROM patients").fetchone()[0],
-            "alert_patients":  conn.execute("SELECT COUNT(*) FROM patients WHERE (drug_allergies IS NOT NULL AND drug_allergies != '[]') OR (other_allergies IS NOT NULL AND other_allergies != '[]')").fetchone()[0],
-            "total_doctors":   conn.execute("SELECT COUNT(*) FROM doctors").fetchone()[0],
-            "dispenses_today": conn.execute("SELECT COUNT(*) FROM dispense_log WHERE date(timestamp)=date('now')").fetchone()[0],
-            "total_dispenses": conn.execute("SELECT COUNT(*) FROM dispense_log").fetchone()[0],
-            "rooms_occupied":  conn.execute("SELECT COUNT(DISTINCT room_id) FROM patients").fetchone()[0],
+            "total_patients": total_patients,
+            "alert_patients": alert_patients,
+            "total_doctors": total_doctors,
+            "dispenses_today": dispenses_today,
+            "total_dispenses": total_dispenses,
+            "rooms_occupied": rooms_occupied,
         }
     finally:
         conn.close()
 
-# ══════════════════════════════════════════════════════════════════
-# PHARMACY STOCK
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════
+# ANALYTICS
+# ════════════════════════════════════════════════════════════════
 
 @router.get("/api/analytics")
 def analytics_summary(days: int = 14):
@@ -96,34 +113,28 @@ def analytics_summary(days: int = 14):
 def shift_report(shift: str = "Matin"):
     conn = None
     try:
-        # Validate shift parameter
         valid_shifts = ["Matin", "Apres-midi", "Nuit"]
         if shift not in valid_shifts:
             raise HTTPException(400, f"Shift invalide. Acceptés: {', '.join(valid_shifts)}")
-        
+
         conn = get_db()
-        
-        # Count distributions today with null safety
+
         dist_result = conn.execute(
             "SELECT COUNT(*) FROM dispense_log WHERE date(timestamp)=date('now')"
         ).fetchone()
         dist_today = dist_result[0] if dist_result else 0
-        
-        # Get patients snapshot
+
         patients = rows_to_list(
             conn.execute("SELECT id, first_name, last_name, room_id, bed FROM patients").fetchall()
         )
-        
-        # Get dispense log for today
+
         log_today = rows_to_list(
             conn.execute(
                 "SELECT * FROM dispense_log WHERE date(timestamp)=date('now') ORDER BY id DESC"
             ).fetchall()
         )
-        
-        # Get current date
+
         today = time.strftime("%Y-%m-%d")
-        
         conn.close()
         return {
             "shift": shift,
@@ -141,4 +152,3 @@ def shift_report(shift: str = "Matin"):
         if conn:
             conn.close()
         raise HTTPException(500, f"Erreur lors de la récupération du rapport de shift: {str(e)}")
-

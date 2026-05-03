@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
+  BedDouble,
   CheckCircle2,
   Pill,
   RefreshCw,
@@ -15,12 +16,16 @@ import { useTheme } from '@/shared/context/ThemeContext';
 import { api } from '@/shared/lib/api';
 import type { LogEntry, Room, Stats, TechStatus } from '@/shared/types/domain';
 
+const REFRESH_INTERVAL_MS = 30_000; // 30 seconds
+
 export function DashboardView({ techStatus }: { techStatus: TechStatus | null }) {
   const { dark } = useTheme();
   const [stats, setStats] = useState<Stats | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [busy, setBusy] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -29,11 +34,9 @@ export function DashboardView({ techStatus }: { techStatus: TechStatus | null })
       setStats(s);
       setLog(l);
       setRooms(r);
+      setLastUpdated(new Date().toLocaleTimeString('fr-FR'));
     } catch (error) {
       console.error('Error loading dashboard data:', error);
-      setStats(null);
-      setLog([]);
-      setRooms([]);
     } finally {
       setBusy(false);
     }
@@ -41,10 +44,16 @@ export function DashboardView({ techStatus }: { techStatus: TechStatus | null })
 
   useEffect(() => {
     load();
+    intervalRef.current = setInterval(load, REFRESH_INTERVAL_MS);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [load]);
+
   if (busy && !stats) return <Spinner />;
 
   const card = dark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+
   const kpis = stats
     ? [
         {
@@ -64,7 +73,7 @@ export function DashboardView({ techStatus }: { techStatus: TechStatus | null })
           border: dark ? 'border-red-800' : 'border-red-100',
         },
         {
-          label: 'Médecins',
+          label: 'Médecins actifs',
           value: stats.total_doctors,
           icon: Stethoscope,
           color: 'text-violet-500',
@@ -87,6 +96,14 @@ export function DashboardView({ techStatus }: { techStatus: TechStatus | null })
           bg: dark ? 'bg-rose-900/30' : 'bg-rose-50',
           border: dark ? 'border-rose-800' : 'border-rose-100',
         },
+        {
+          label: 'Salles occupées',
+          value: stats.rooms_occupied ?? 0,
+          icon: BedDouble,
+          color: 'text-amber-500',
+          bg: dark ? 'bg-amber-900/30' : 'bg-amber-50',
+          border: dark ? 'border-amber-800' : 'border-amber-100',
+        },
       ]
     : [];
 
@@ -100,6 +117,11 @@ export function DashboardView({ techStatus }: { techStatus: TechStatus | null })
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {lastUpdated && (
+            <span className={`text-xs ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
+              Mis à jour : {lastUpdated}
+            </span>
+          )}
           <SystemStatusPill techStatus={techStatus} />
           <button
             onClick={load}
@@ -114,7 +136,7 @@ export function DashboardView({ techStatus }: { techStatus: TechStatus | null })
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {kpis.map((k) => (
           <div key={k.label} className={`${k.bg} border ${k.border} rounded-2xl p-5`}>
             <div className="flex items-center justify-between mb-3">
