@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from config import settings
+from config import settings, SYNC_ENABLED
 from database import init_db
 from middleware import register_audit_middleware
 from routers.sync import router as sync_router
@@ -23,13 +23,17 @@ from routers import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # Only start MQTT and sync loop in LOCAL hospital mode
+    # Only start MQTT in LOCAL hospital mode
     if settings.MQTT_ENABLED:
         from mqtt import setup_mqtt_client
         setup_mqtt_client()
-    sync_task = asyncio.create_task(run_sync_loop())
+    # Only start sync loop if explicitly enabled via SYNC_ENABLED=true in .env
+    sync_task = None
+    if SYNC_ENABLED:
+        sync_task = asyncio.create_task(run_sync_loop())
     yield
-    sync_task.cancel()
+    if sync_task:
+        sync_task.cancel()
     if mqtt_mod._mqtt:
         try:
             mqtt_mod._mqtt.loop_stop()
