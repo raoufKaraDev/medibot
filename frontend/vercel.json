@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://medibot-backend-production-23ce.up.railway.app/:path*"
+      "destination": "https://medibot-backend-production-23ce.up.railway.app/api/:path*"
     },
     {
       "source": "/(.*)",
