@@ -25,7 +25,6 @@ def write_audit(
     **extra,
 ):
     try:
-        # Ensure actor is never NULL - use "system" as fallback
         actor = (actor or "").strip() or "system"
         conn.execute(
             "INSERT INTO audit_log(actor,actor_role,action,target_type,target_id,detail) VALUES (?,?,?,?,?,?)",
@@ -78,7 +77,6 @@ def _ensure_pin_hashes(conn) -> None:
 
 
 def _migrate_doctor_roles_to_new_format(conn) -> None:
-    """Migrates old doctor role names to new role slug format."""
     c = conn.cursor()
     role_mapping = {
         "Médecin Chef Pédiatrie": "CHEF_SERVICE",
@@ -95,7 +93,6 @@ def _migrate_doctor_roles_to_new_format(conn) -> None:
 
 
 def _migrate_prescriptions_to_ordonnances(conn) -> None:
-    """Crée une ordonnance + lignes à partir des prescriptions existantes si la table est vide."""
     c = conn.cursor()
     n = c.execute("SELECT COUNT(*) FROM ordonnances").fetchone()[0]
     if n and n > 0:
@@ -145,7 +142,6 @@ def _migrate_prescriptions_to_ordonnances(conn) -> None:
 
 
 def _ensure_doctor_columns(conn) -> None:
-    """Ensure all required columns exist in the doctors table."""
     c = conn.cursor()
     columns = {
         "username": "TEXT",
@@ -158,52 +154,89 @@ def _ensure_doctor_columns(conn) -> None:
         try:
             c.execute(f"ALTER TABLE doctors ADD COLUMN {col} {type_}")
         except sqlite3.OperationalError:
-            pass  # Column already exists
+            pass
     conn.commit()
 
 
 def _ensure_single_doctor(conn) -> None:
-    """Enforce a single doctor model: Dr. KARA Abderraouf."""
     c = conn.cursor()
-    
-    # Target doctor details
     target_rfid = "3E487B89"
     target_name = "Dr. KARA Abderraouf"
     target_username = "kara"
     target_password = "kara1235"
     target_pin = "1234"
     target_role = "CHEF_SERVICE"
-    
     from helpers import hash_password
     pwd_hash = hash_password(target_password)
     pin_h = pwd_context.hash(target_pin)
-
-    # 1. Remove all other doctors
     c.execute("DELETE FROM doctors WHERE rfid_uid != ?", (target_rfid,))
-    
-    # 2. Check if target doctor exists
     existing = c.execute("SELECT id FROM doctors WHERE rfid_uid = ?", (target_rfid,)).fetchone()
-    
     if existing:
-        # Update existing doctor to match target credentials
         c.execute("""
-            UPDATE doctors 
+            UPDATE doctors
             SET name=?, username=?, password_hash=?, pin=?, pin_hash=?, role=?, status='ACTIVE'
             WHERE rfid_uid=?
         """, (target_name, target_username, pwd_hash, target_pin, pin_h, target_role, target_rfid))
     else:
-        # Create the single doctor
         c.execute("""
             INSERT INTO doctors (rfid_uid, name, username, password_hash, pin, pin_hash, role, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, 'ACTIVE')
         """, (target_rfid, target_name, target_username, pwd_hash, target_pin, pin_h, target_role))
-    
     conn.commit()
+
+
+def _migrate_audit_log_nullable(conn) -> None:
+    """
+    Recreate audit_log with all nullable columns.
+    The original CREATE TABLE had actor_role and target_type as NOT NULL,
+    which breaks write_audit() calls that pass None for these fields.
+    SQLite does not support ALTER COLUMN, so we use the rename-recreate pattern.
+    Safe to run multiple times: skips if already nullable.
+    """
+    try:
+        info = conn.execute("PRAGMA table_info(audit_log)").fetchall()
+        col_map = {row[1]: row[3] for row in info}  # name -> notnull
+        # notnull=1 means NOT NULL constraint. If actor_role or target_type are NOT NULL, migrate.
+        if col_map.get("actor_role", 0) == 0 and col_map.get("target_type", 0) == 0:
+            return  # already nullable, nothing to do
+        conn.execute("ALTER TABLE audit_log RENAME TO audit_log_old")
+        conn.execute("""
+            CREATE TABLE audit_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor       TEXT NOT NULL,
+                actor_role  TEXT,
+                actor_rfid  TEXT,
+                action      TEXT NOT NULL,
+                target_type TEXT,
+                target_id   INTEGER,
+                detail      TEXT,
+                value_before TEXT,
+                value_after  TEXT,
+                timestamp   TEXT DEFAULT (datetime('now'))
+            )
+        """)
+        conn.execute("""
+            INSERT INTO audit_log(id, actor, actor_role, actor_rfid, action, target_type, target_id, detail, timestamp)
+            SELECT id, actor,
+                   COALESCE(actor_role, ''),
+                   NULL,
+                   action,
+                   COALESCE(target_type, ''),
+                   target_id,
+                   detail,
+                   timestamp
+            FROM audit_log_old
+        """)
+        conn.execute("DROP TABLE audit_log_old")
+        conn.commit()
+        print("[migrate_audit_log] Recreated audit_log with nullable columns.")
+    except Exception as e:
+        print(f"[migrate_audit_log] Error: {e}")
 
 
 def init_db():
     conn = get_db(); c = conn.cursor()
-    
+
     # ── Clean up any stale DEMO data on startup ──────────────────────────────────
     try:
         c.execute("DELETE FROM dispense_log WHERE med_name LIKE '%DEMO%'")
@@ -211,7 +244,8 @@ def init_db():
         conn.commit()
     except Exception:
         pass
-    
+
+    # NOTE: audit_log here uses all-nullable schema (fixed from original NOT NULL version)
     c.executescript("""
         CREATE TABLE IF NOT EXISTS doctors (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,7 +254,7 @@ def init_db():
             username      TEXT,
             password_hash TEXT,
             role          TEXT    NOT NULL DEFAULT 'Médecin',
-            pin           TEXT    NOT NULL,
+            pin           TEXT    NOT NULL DEFAULT '',
             pin_hash      TEXT,
             phone         TEXT,
             status        TEXT    DEFAULT 'ACTIVE',
@@ -317,17 +351,17 @@ def init_db():
             instructions    TEXT    DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            actor TEXT NOT NULL,
-            actor_role TEXT NOT NULL,
-            actor_rfid TEXT,
-            action TEXT NOT NULL,
-            target_type TEXT NOT NULL,
-            target_id INTEGER,
-            detail TEXT,
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor       TEXT NOT NULL,
+            actor_role  TEXT,
+            actor_rfid  TEXT,
+            action      TEXT NOT NULL,
+            target_type TEXT,
+            target_id   INTEGER,
+            detail      TEXT,
             value_before TEXT,
-            value_after TEXT,
-            timestamp TEXT DEFAULT (datetime('now'))
+            value_after  TEXT,
+            timestamp   TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS dossiers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,14 +431,13 @@ def init_db():
         );
     """)
 
+    # ── CRITICAL: Fix audit_log NOT NULL constraints on existing DBs ──────────
+    _migrate_audit_log_nullable(conn)
 
     # ══════════════════════════════════════════════════════════════
-    # SCHEMA MIGRATIONS — add missing columns to existing DB tables
-    # SQLite doesn't support IF NOT EXISTS on ALTER TABLE,
-    # so we try each migration and ignore "duplicate column" errors.
+    # SCHEMA MIGRATIONS
     # ══════════════════════════════════════════════════════════════
     migrations = [
-        # New lifecycle management columns
         "ALTER TABLE patients ADD COLUMN dossier_id INTEGER REFERENCES dossiers(id)",
         "ALTER TABLE patients ADD COLUMN sejour_id INTEGER REFERENCES sejours(id)",
         "ALTER TABLE patients ADD COLUMN etat TEXT DEFAULT 'admis'",
@@ -416,13 +449,11 @@ def init_db():
         "ALTER TABLE patients ADD COLUMN consignes_parents TEXT",
         "ALTER TABLE patients ADD COLUMN medecin_sortie TEXT",
         "ALTER TABLE patients ADD COLUMN is_archived INTEGER DEFAULT 0",
-        # prescription_docs enhancements
         "ALTER TABLE prescription_docs ADD COLUMN uuid TEXT",
         "ALTER TABLE prescription_docs ADD COLUMN updatedat TEXT DEFAULT (datetime('now'))",
         "ALTER TABLE prescription_docs ADD COLUMN modifiedby TEXT",
         "ALTER TABLE prescription_docs ADD COLUMN hospitalisation_ref TEXT",
         "ALTER TABLE prescription_docs ADD COLUMN status TEXT DEFAULT 'active'",
-        # prescription_items complete redesign
         "ALTER TABLE prescription_items ADD COLUMN dose_mg REAL",
         "ALTER TABLE prescription_items ADD COLUMN dose_ml REAL",
         "ALTER TABLE prescription_items ADD COLUMN frequency_per_day INTEGER DEFAULT 1",
@@ -437,22 +468,17 @@ def init_db():
         "ALTER TABLE prescription_items ADD COLUMN dispensedby TEXT",
         "ALTER TABLE prescription_items ADD COLUMN createdat TEXT DEFAULT (datetime('now'))",
         "ALTER TABLE prescription_items ADD COLUMN updatedat TEXT DEFAULT (datetime('now'))",
-        # doctors table — new columns for staff management
         "ALTER TABLE doctors ADD COLUMN username TEXT DEFAULT ''",
         "ALTER TABLE doctors ADD COLUMN passwordhash TEXT DEFAULT ''",
         "ALTER TABLE doctors ADD COLUMN phone TEXT",
         "ALTER TABLE doctors ADD COLUMN status TEXT DEFAULT 'ACTIVE'",
-        # guardians table
         "ALTER TABLE guardians ADD COLUMN relationship TEXT DEFAULT 'Parent'",
         "ALTER TABLE guardians ADD COLUMN present      INTEGER DEFAULT 1",
-        # patients table
         "ALTER TABLE patients  ADD COLUMN photo        TEXT",
         "ALTER TABLE patients  ADD COLUMN notes        TEXT DEFAULT ''",
         "ALTER TABLE patients  ADD COLUMN allergies    TEXT DEFAULT '[]'",
-        # dispense_log table
         "ALTER TABLE dispense_log ADD COLUMN doctor    TEXT",
         "ALTER TABLE dispense_log ADD COLUMN note      TEXT DEFAULT ''",
-        # medications table
         "ALTER TABLE medications ADD COLUMN time       TEXT",
         "ALTER TABLE medications ADD COLUMN schedule   TEXT",
         "ALTER TABLE medications ADD COLUMN is_high_risk INTEGER DEFAULT 0",
@@ -525,23 +551,19 @@ def init_db():
             conn.execute(sql)
             conn.commit()
         except Exception:
-            pass  # column already exists or table not yet created — safe to ignore
+            pass
 
-    # ── Migration: Rename patientid → patient_id in vitals table (if it exists with old name)
     try:
-        # Check if vitals table exists and has patientid column
         columns = conn.execute("PRAGMA table_info(vitals)").fetchall()
         has_patientid = any(col[1] == 'patientid' for col in columns)
         if has_patientid:
-            # Rename column using SQLite 3.25.0+ syntax
             conn.execute("ALTER TABLE vitals RENAME COLUMN patientid TO patient_id")
             conn.commit()
     except Exception as e:
-        # If rename fails, try workaround: recreate table with correct schema
         try:
             conn.execute("""
                 CREATE TABLE vitals_new AS
-                SELECT id, patientid AS patient_id, temperature, respiratory_rate, spo2, 
+                SELECT id, patientid AS patient_id, temperature, respiratory_rate, spo2,
                        diuresis, transit, glasgow, recorded_by, shift, timestamp
                 FROM vitals;
             """)
@@ -549,7 +571,7 @@ def init_db():
             conn.execute("ALTER TABLE vitals_new RENAME TO vitals")
             conn.commit()
         except Exception:
-            pass  # Table already has correct schema or workaround failed — continue
+            pass
 
     _pharmacy_backfills = [
         "UPDATE pharmacy_stock SET therapeutic_class='Antibiotique — Pénicillines' WHERE therapeutic_class='' AND (name LIKE '%Amoxicilline%' OR name LIKE '%Ampicilline%' OR name LIKE '%Augmentin%')",
@@ -594,7 +616,6 @@ def init_db():
         except Exception:
             pass
 
-    # ── NEW ARCHITECTURE: Permanent patient files + hospitalizations ──────
     c.executescript("""
         CREATE TABLE IF NOT EXISTS dossiers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -697,14 +718,17 @@ def init_db():
             payload TEXT
         );
         CREATE TABLE IF NOT EXISTS audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            actor TEXT NOT NULL,
-            actor_role TEXT,
-            action TEXT NOT NULL,
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor       TEXT NOT NULL,
+            actor_role  TEXT,
+            actor_rfid  TEXT,
+            action      TEXT NOT NULL,
             target_type TEXT,
-            target_id INTEGER,
-            detail TEXT,
-            timestamp TEXT DEFAULT (datetime('now'))
+            target_id   INTEGER,
+            detail      TEXT,
+            value_before TEXT,
+            value_after  TEXT,
+            timestamp   TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS ordonnances (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -782,26 +806,23 @@ def init_db():
     """)
     conn.commit()
 
-    # ── Seed rooms ─────────────────────────────────────────────────
     if c.execute("SELECT COUNT(*) FROM rooms").fetchone()[0] == 0:
         for i in range(1, 11):
             c.execute("INSERT OR IGNORE INTO rooms(id,name) VALUES (?,?)",
                       (i, f"Salle {str(i).zfill(2)}"))
 
-    # ── Migration: Add username and passwordhash columns if they don't exist ──
     try:
         c.execute("ALTER TABLE doctors ADD COLUMN username TEXT DEFAULT ''")
         conn.commit()
     except Exception:
-        pass  # Column already exists
+        pass
 
     try:
         c.execute("ALTER TABLE doctors ADD COLUMN password_hash TEXT DEFAULT ''")
         conn.commit()
     except Exception:
-        pass  # Column already exists
+        pass
 
-    # ── Ensure extended doctor columns exist (older DBs) ────────────
     for stmt in [
         "ALTER TABLE doctors ADD COLUMN photo TEXT",
         "ALTER TABLE doctors ADD COLUMN pin_hash TEXT",
@@ -814,13 +835,11 @@ def init_db():
         except Exception:
             pass
 
-    # ── Seed default Chef de Service account (only if none exists) ──
     try:
         seed._seed_default_admin(conn)
     except Exception as ex:
         print(f"[init_db] seed_default_admin: {ex}")
 
-    # ── Seed patients ──────────────────────────────────────────────
     seed_patients = [
         ("Yanis", "Belkacem", 6, "21kg", "A+", "Pneumonie", 1, 1, "[]", "2020-03-15", "A", "positif", 1, 0, 0, 1, 0, 0, "[]", "[]", "", ""),
         ("Sami", "Haddad", 5, "19kg", "O-", "Bronchiolite", 1, 2, '[{"medication":"Arachides"}]', "2021-06-10", "O", "negatif", 0, 0, 0, 0, 0, 0, "[]", '["Arachides"]', "", ""),
@@ -845,32 +864,7 @@ def init_db():
             gs = bt
             c.execute(
                 ins_pat,
-                (
-                    fn,
-                    ln,
-                    age,
-                    w,
-                    bt,
-                    diag,
-                    rid,
-                    bed,
-                    allj,
-                    "",
-                    dn,
-                    gs,
-                    ga,
-                    rh,
-                    pC,
-                    pc,
-                    pE,
-                    pe,
-                    pK,
-                    pk,
-                    ant,
-                    te,
-                    drug_j,
-                    oth_j,
-                ),
+                (fn, ln, age, w, bt, diag, rid, bed, allj, "", dn, gs, ga, rh, pC, pc, pE, pe, pK, pk, ant, te, drug_j, oth_j),
             )
         guardians_seed = [
             (1,"Ahmed Belkacem","213 550 12 34 56","Père"),
@@ -888,8 +882,6 @@ def init_db():
             c.execute("INSERT INTO guardians(patient_id,name,phone,relationship) VALUES (?,?,?,?)", g)
         conn.commit()
 
-    # ── Catalogue médicaments / consommables (medicine.json) ou seed minimal ──
-    # Ne pas réimporter à chaque démarrage (efface meds/stock) : seulement si table vide ou FORCE_MEDICINE_JSON_IMPORT=1
     _mj = os.getenv("MEDICINE_JSON", "").strip()
     catalog_path = (
         Path(_mj)
@@ -934,23 +926,15 @@ def init_db():
                     s,
                 )
         try:
-            c.execute(
-                "UPDATE pharmacy_stock SET pediatric_mg_per_kg=40 WHERE drawer=1 AND pediatric_mg_per_kg IS NULL"
-            )
-            c.execute(
-                "UPDATE pharmacy_stock SET pediatric_mg_per_kg=15 WHERE drawer=2 AND pediatric_mg_per_kg IS NULL"
-            )
-            c.execute(
-                "UPDATE pharmacy_stock SET pediatric_mg_per_kg=35 WHERE drawer=4 AND pediatric_mg_per_kg IS NULL"
-            )
+            c.execute("UPDATE pharmacy_stock SET pediatric_mg_per_kg=40 WHERE drawer=1 AND pediatric_mg_per_kg IS NULL")
+            c.execute("UPDATE pharmacy_stock SET pediatric_mg_per_kg=15 WHERE drawer=2 AND pediatric_mg_per_kg IS NULL")
+            c.execute("UPDATE pharmacy_stock SET pediatric_mg_per_kg=35 WHERE drawer=4 AND pediatric_mg_per_kg IS NULL")
         except Exception:
             pass
         seed.seed_demo_prescriptions(c)
 
     try:
-        c.execute(
-            "UPDATE medications SET is_high_risk=1 WHERE lower(name) LIKE '%morphine%' OR lower(name) LIKE '%insulin%' OR lower(name) LIKE '%warfar%'"
-        )
+        c.execute("UPDATE medications SET is_high_risk=1 WHERE lower(name) LIKE '%morphine%' OR lower(name) LIKE '%insulin%' OR lower(name) LIKE '%warfar%'")
     except Exception:
         pass
 
@@ -970,16 +954,12 @@ def init_db():
                 )
 
     try:
-        c.execute(
-            "INSERT OR IGNORE INTO prescription_validation(patient_id,status) SELECT id,'approved' FROM patients"
-        )
+        c.execute("INSERT OR IGNORE INTO prescription_validation(patient_id,status) SELECT id,'approved' FROM patients")
     except Exception:
         pass
 
     try:
-        c.execute(
-            "UPDATE patients SET groupe_sanguin = blood_type WHERE groupe_sanguin IS NULL OR groupe_sanguin = ''"
-        )
+        c.execute("UPDATE patients SET groupe_sanguin = blood_type WHERE groupe_sanguin IS NULL OR groupe_sanguin = ''")
     except Exception:
         pass
 
@@ -1003,11 +983,6 @@ def init_db():
         seed._seed_demo_audit_log(c)
     except Exception as ex:
         print(f"[init_db] seed audit_log: {ex}")
-    # Disabled: demo dispense_log entries cause confusion in analytics
-    # try:
-    #     seed._seed_demo_dispenselog(c)
-    # except Exception as ex:
-    #     print(f"[init_db] seed dispenselog: {ex}")
 
     med_meta = [
         (1, "Antibiotique", "LOT-AMX-2026-01", "500mg", 100.0, 500.0, 1),
@@ -1035,15 +1010,8 @@ def init_db():
                 c.execute(
                     """UPDATE pharmacy_stock SET classe_therapeutique=?, numero_lot=?, concentration=?,
                        volume_ampoule_ml=?, dose_ampoule_mg=?, distributed_by_robot=? WHERE drawer=?""",
-                    (
-                        mr.get("classe_therapeutique"),
-                        mr.get("numero_lot"),
-                        mr.get("concentration"),
-                        mr.get("volume_ampoule_ml"),
-                        mr.get("dose_ampoule_mg"),
-                        mr.get("distributed_by_robot"),
-                        dr,
-                    ),
+                    (mr.get("classe_therapeutique"), mr.get("numero_lot"), mr.get("concentration"),
+                     mr.get("volume_ampoule_ml"), mr.get("dose_ampoule_mg"), mr.get("distributed_by_robot"), dr),
                 )
         except Exception:
             pass
@@ -1053,7 +1021,6 @@ def init_db():
     seed._seed_default_admin(conn)
     _migrate_prescriptions_to_ordonnances(conn)
 
-    # ── Create indexes for frequently queried columns ──────────────
     index_statements = [
         "CREATE INDEX IF NOT EXISTS idx_vitals_patient_id ON vitals(patient_id)",
         "CREATE INDEX IF NOT EXISTS idx_dispense_log_patient_id ON dispense_log(patient_id)",
@@ -1070,7 +1037,7 @@ def init_db():
         try:
             conn.execute(idx_sql)
         except Exception:
-            pass  # Index might already exist
+            pass
 
     conn.commit()
     conn.close()
