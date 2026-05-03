@@ -1,10 +1,10 @@
 """
 SyncSender — sends payload to remote over HTTPS with retry queue.
 """
+import hashlib
 import json
 import logging
 import os
-import requests
 from datetime import datetime
 from config import BACKUP_URL, BACKUP_API_KEY, SYNC_RETRY_ATTEMPTS
 
@@ -12,32 +12,45 @@ logger = logging.getLogger("medibot.sync.sender")
 
 RETRY_QUEUE_FILE = "sync_retry_queue.json"
 MAX_QUEUE_SIZE = 100
-MAX_WARN_COUNT = 3  # warn this many times, then skip HTTP entirely
+MAX_WARN_COUNT = 3
+
+
+def _recompute_checksum(payload: dict) -> dict:
+    """
+    Recompute checksum from the final serialized domains dict.
+    This ensures sender and receiver use the exact same bytes.
+    """
+    domains_json = json.dumps(payload["domains"], sort_keys=True, default=str)
+    payload["checksum"] = hashlib.sha256(domains_json.encode()).hexdigest()
+    return payload
 
 
 class SyncSender:
     def __init__(self):
         self.remote_url = f"{BACKUP_URL}/api/sync/push"
-        self.timeout = 5  # never block startup for more than 5s per attempt
+        self.timeout = 15  # increased: Railway cold starts can be slow
         self._consecutive_failures = 0
 
     def send_sync(self, payload: dict) -> bool:
         """Send payload to remote. Returns True if successful."""
+        import requests
 
-        # After MAX_WARN_COUNT failures, skip HTTP entirely — just queue
         if self._consecutive_failures >= MAX_WARN_COUNT:
             logger.debug("Sync skipped: still offline (silent mode)")
             self._queue_for_retry(payload)
             return False
 
+        # Recompute checksum from final payload to guarantee match
+        payload = _recompute_checksum(dict(payload))
+
         try:
-            headers = {}
+            headers = {"Content-Type": "application/json"}
             if BACKUP_API_KEY:
                 headers["X-Sync-Key"] = BACKUP_API_KEY
 
             response = requests.post(
                 self.remote_url,
-                json=payload,
+                data=json.dumps(payload, default=str),  # use data= not json= to control serialization
                 timeout=self.timeout,
                 headers=headers,
                 verify=True,
@@ -65,11 +78,12 @@ class SyncSender:
             return False
         except requests.exceptions.HTTPError as e:
             status = e.response.status_code if e.response else 0
+            body = e.response.text if e.response else ""
             if status == 400:
-                logger.error(f"Sync rejected by remote (400): {e.response.text}")
+                logger.error(f"Sync rejected by remote (400): {body}")
                 return False
             self._consecutive_failures += 1
-            logger.warning(f"Sync failed HTTP {status} — queuing for retry")
+            logger.warning(f"Sync failed HTTP {status} — queuing for retry. Detail: {body}")
             self._queue_for_retry(payload)
             return False
         except Exception as e:
@@ -115,4 +129,4 @@ class SyncSender:
         })
         queue = queue[-MAX_QUEUE_SIZE:]
         with open(RETRY_QUEUE_FILE, "w", encoding="utf-8") as f:
-            json.dump(queue, f)
+            json.dump(queue, f, default=str)
