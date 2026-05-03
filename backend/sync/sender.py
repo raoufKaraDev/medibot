@@ -12,17 +12,24 @@ logger = logging.getLogger("medibot.sync.sender")
 
 RETRY_QUEUE_FILE = "sync_retry_queue.json"
 MAX_QUEUE_SIZE = 100
-MAX_WARN_COUNT = 3  # log warning only this many times, then go silent
+MAX_WARN_COUNT = 3  # warn this many times, then skip HTTP entirely
 
 
 class SyncSender:
     def __init__(self):
         self.remote_url = f"{BACKUP_URL}/api/sync/push"
-        self.timeout = 30
-        self._consecutive_failures = 0  # reset to 0 on any success
+        self.timeout = 5  # never block startup for more than 5s per attempt
+        self._consecutive_failures = 0
 
     def send_sync(self, payload: dict) -> bool:
         """Send payload to remote. Returns True if successful."""
+
+        # After MAX_WARN_COUNT failures, skip HTTP entirely — just queue
+        if self._consecutive_failures >= MAX_WARN_COUNT:
+            logger.debug("Sync skipped: still offline (silent mode)")
+            self._queue_for_retry(payload)
+            return False
+
         try:
             headers = {}
             if BACKUP_API_KEY:
@@ -42,24 +49,18 @@ class SyncSender:
 
         except requests.exceptions.ConnectionError:
             self._consecutive_failures += 1
-            if self._consecutive_failures <= MAX_WARN_COUNT:
-                logger.warning(
-                    f"Sync failed: no internet — queuing for retry "
-                    f"({self._consecutive_failures}/{MAX_WARN_COUNT})"
-                )
-            else:
-                logger.debug("Sync skipped: still offline (silent mode)")
+            logger.warning(
+                f"Sync failed: no internet — queuing for retry "
+                f"({self._consecutive_failures}/{MAX_WARN_COUNT})"
+            )
             self._queue_for_retry(payload)
             return False
         except requests.exceptions.Timeout:
             self._consecutive_failures += 1
-            if self._consecutive_failures <= MAX_WARN_COUNT:
-                logger.warning(
-                    f"Sync failed: timeout — queuing for retry "
-                    f"({self._consecutive_failures}/{MAX_WARN_COUNT})"
-                )
-            else:
-                logger.debug("Sync skipped: still timing out (silent mode)")
+            logger.warning(
+                f"Sync failed: timeout — queuing for retry "
+                f"({self._consecutive_failures}/{MAX_WARN_COUNT})"
+            )
             self._queue_for_retry(payload)
             return False
         except requests.exceptions.HTTPError as e:
@@ -68,8 +69,7 @@ class SyncSender:
                 logger.error(f"Sync rejected by remote (400): {e.response.text}")
                 return False
             self._consecutive_failures += 1
-            if self._consecutive_failures <= MAX_WARN_COUNT:
-                logger.warning(f"Sync failed HTTP {status} — queuing for retry")
+            logger.warning(f"Sync failed HTTP {status} — queuing for retry")
             self._queue_for_retry(payload)
             return False
         except Exception as e:
