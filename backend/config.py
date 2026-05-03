@@ -2,6 +2,13 @@ import os
 import time
 from enum import Enum
 
+# Load .env file before reading any os.getenv() calls
+try:
+    from dotenv import load_dotenv
+    load_dotenv(override=False)  # override=False: real env vars take priority (Railway)
+except ImportError:
+    pass  # dotenv not installed — fall back to system env vars only
+
 
 class EnvironmentType(str, Enum):
     LOCALHOSPITAL = "LOCALHOSPITAL"
@@ -26,10 +33,6 @@ class Settings:
     )
 
     # Database Configuration
-    # REMOTEBACKUP uses /tmp/medibot.db — writable on Railway, shared across
-    # all get_db() calls within the same process lifetime.
-    # NOTE: /tmp is ephemeral on Railway restarts — that is acceptable for the
-    # remote backup role (data is received via sync push from the local server).
     if EnvironmentType(os.getenv("MEDIBOT_ENVIRONMENT", "LOCALHOSPITAL")) \
        == EnvironmentType.LOCALHOSPITAL:
         DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./medibot.db")
@@ -59,7 +62,7 @@ class Settings:
                 == EnvironmentType.LOCALHOSPITAL else "REMOTESTRONG"
     )
 
-    # CORS — allow all origins on Railway so the Vercel frontend can reach it
+    # CORS
     CORS_ORIGINS: list = (
         ["http://localhost", "http://127.0.0.1", "http://192.168.1."]
         if EnvironmentType(os.getenv("MEDIBOT_ENVIRONMENT", "LOCALHOSPITAL"))
@@ -95,7 +98,7 @@ class Settings:
 
 settings = Settings()
 
-# Backward-compatibility exports for existing backend imports.
+# Backward-compatibility exports
 ENVIRONMENT = settings.ENVIRONMENT
 IS_LOCAL = ENVIRONMENT == EnvironmentType.LOCALHOSPITAL
 IS_REMOTE = ENVIRONMENT == EnvironmentType.REMOTEBACKUP
