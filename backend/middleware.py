@@ -31,15 +31,48 @@ class AdminContext(str, _Enum):
     LOCAL  = "LOCAL"
     REMOTE = "REMOTE"
 
+
+def _is_local_ip(ip: str) -> bool:
+    """True for hospital LAN, loopback, and Railway internal IPs (100.64.x.x)."""
+    return (
+        ip.startswith("192.168.1.")
+        or ip.startswith("192.168.")
+        or ip.startswith("10.")
+        or ip.startswith("172.16.")
+        or ip.startswith("100.64.")   # Railway internal CGNAT range
+        or ip in ("127.0.0.1", "localhost", "::1", "")
+    )
+
+
 async def get_admin_context(request: _Request) -> AdminContext:
-    """LOCAL = hospital LAN. REMOTE = reverse proxy with X-Remote-User."""
+    """
+    Determine admin context from request origin.
+
+    LOCAL  — hospital LAN, loopback, or Railway internal network
+    REMOTE — any origin that presents a valid X-Medibot-Doctor-Id header
+             (sent automatically by the React frontend after login)
+
+    If neither condition is met → 401 Unauthorized.
+    """
     client_ip = request.client.host if request.client else ""
-    if client_ip.startswith("192.168.1.") or \
-       client_ip in ("127.0.0.1", "localhost", "::1"):
+
+    # Hospital LAN / local / Railway internal network → always LOCAL
+    if _is_local_ip(client_ip):
         return AdminContext.LOCAL
-    if "X-Remote-User" in request.headers:
+
+    # Remote (Vercel admin) → must carry the auth header set after login
+    doctor_id = (
+        request.headers.get("x-medibot-doctor-id")
+        or request.headers.get("X-Medibot-Doctor-Id")
+        or request.headers.get("x-medibot-user-id")
+        or request.headers.get("X-Medibot-User-Id")
+        or request.headers.get("X-Remote-User")   # legacy fallback
+    )
+    if doctor_id:
         return AdminContext.REMOTE
+
     raise _HTTPException(status_code=401, detail="Unauthorized")
+
 
 async def require_local_admin(
     context: AdminContext = _Depends(get_admin_context)
@@ -54,6 +87,7 @@ async def require_local_admin(
             status_code=403,
             detail="Operation requires local admin access (hospital LAN only)"
         )
+
 
 async def require_admin(
     context: AdminContext = _Depends(get_admin_context)
@@ -80,6 +114,7 @@ class AdminActionType(str, _Enum):
     STOCK_UPDATE         = "STOCK_UPDATE"
     SETTINGS_CHANGE      = "SETTINGS_CHANGE"
     DISPENSE_TRIGGER     = "DISPENSE_TRIGGER"
+
 
 async def log_admin_action(
     action: AdminActionType,
