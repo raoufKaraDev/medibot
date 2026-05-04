@@ -1,6 +1,7 @@
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
+from typing import Optional
 
 from database import get_db, write_audit
 from helpers import (
@@ -50,9 +51,6 @@ def dispense(req: DispenseRequest):
         log_id = cursor.lastrowid
         conn.commit()
         try:
-            # NOTE: DispenseRequest in app/schemas.py should declare:
-            #   doctor: Optional[str] = None
-            #   doctorrole: Optional[str] = None
             write_audit(
                 conn,
                 actor=getattr(req, 'doctor', None) or 'Kiosk',
@@ -91,10 +89,13 @@ def add_dispense_note(log_id: int, data: LogNote):
 
 
 @router.get("/api/log")
-def get_log():
+def get_log(
+    patient_id: Optional[int] = Query(None, description="Filter by patient ID"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
     conn = get_db()
-    # Join dispense_log with patients and pharmacy_stock to get names
-    rows = conn.execute("""
+    base_query = """
         SELECT
             d.id, d.timestamp, d.patient_id, d.med_name, d.drawer, d.doctor,
             d.mqtt_sent, d.note, d.waste_reason, d.waste_detail, d.dose_status,
@@ -104,11 +105,61 @@ def get_log():
         FROM dispense_log d
         LEFT JOIN patients p ON d.patient_id = p.id
         LEFT JOIN pharmacy_stock s ON d.med_name = s.name AND d.drawer = s.drawer
-        ORDER BY d.timestamp DESC LIMIT 50
-    """).fetchall()
-    conn.close()
-    return rows_to_list(rows)
+    """
+    if patient_id is not None:
+        rows = conn.execute(
+            base_query + " WHERE d.patient_id=? ORDER BY d.timestamp DESC LIMIT ? OFFSET ?",
+            (patient_id, limit, offset),
+        ).fetchall()
+        total_row = conn.execute(
+            "SELECT COUNT(*) as total FROM dispense_log WHERE patient_id=?", (patient_id,)
+        ).fetchone()
+    else:
+        rows = conn.execute(
+            base_query + " ORDER BY d.timestamp DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        total_row = conn.execute("SELECT COUNT(*) as total FROM dispense_log").fetchone()
 
+    total = total_row["total"] if total_row else 0
+    conn.close()
+    return {"items": rows_to_list(rows), "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/api/patients/{patient_id}/history")
+def get_patient_history(
+    patient_id: int,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Patient-scoped dispensing history with pagination."""
+    conn = get_db()
+    patient = conn.execute("SELECT id FROM patients WHERE id=?", (patient_id,)).fetchone()
+    if not patient:
+        conn.close()
+        raise HTTPException(404, "Patient introuvable")
+
+    rows = conn.execute("""
+        SELECT
+            d.id, d.timestamp, d.patient_id, d.med_name, d.drawer, d.doctor,
+            d.mqtt_sent, d.note, d.waste_reason, d.waste_detail, d.dose_status,
+            d.prise_confirmed_at, d.prise_confirmed_by,
+            p.first_name || ' ' || p.last_name AS patient_name,
+            s.name AS drug_name, s.dosage, s.unit
+        FROM dispense_log d
+        LEFT JOIN patients p ON d.patient_id = p.id
+        LEFT JOIN pharmacy_stock s ON d.med_name = s.name AND d.drawer = s.drawer
+        WHERE d.patient_id = ?
+        ORDER BY d.timestamp DESC
+        LIMIT ? OFFSET ?
+    """, (patient_id, limit, offset)).fetchall()
+
+    total_row = conn.execute(
+        "SELECT COUNT(*) as total FROM dispense_log WHERE patient_id=?", (patient_id,)
+    ).fetchone()
+    total = total_row["total"] if total_row else 0
+    conn.close()
+    return {"items": rows_to_list(rows), "total": total, "limit": limit, "offset": offset}
 
 
 @router.post("/api/prises/valider")
@@ -145,7 +196,6 @@ def prise_valider(body: PriseValiderBody):
         if conn:
             conn.close()
         raise
-
 
 
 @router.post("/api/log/{log_id}/waste")
