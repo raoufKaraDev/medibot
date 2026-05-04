@@ -7,7 +7,7 @@ from datetime import date as dtdate
 from fastapi import APIRouter, HTTPException
 from database import get_db, write_audit
 from helpers import row_to_dict, rows_to_list
-from schemas import DossierCreate, SejourCreate, DischargeRequest, DeletePatientRequest
+from schemas import DossierCreate, SejourCreate, DischargeRequest
 import json
 
 router = APIRouter(tags=["lifecycle"])
@@ -29,7 +29,7 @@ def search_dossiers(
     try:
         query = "SELECT * FROM dossiers WHERE 1=1"
         params = []
-        
+
         if nom:
             query += " AND nom LIKE ?"
             params.append(f"%{nom}%")
@@ -42,48 +42,120 @@ def search_dossiers(
         if telephone:
             query += " AND telephone LIKE ?"
             params.append(f"%{telephone}%")
-        
+
         query += " ORDER BY date_naissance DESC, nom, prenom"
-        
+
         dossier_rows = conn.execute(query, params).fetchall()
         results = []
-        
+
         for row in dossier_rows:
             d = dict(row)
-            
-            # Count sejours for this dossier
+
             sejours_count = conn.execute(
                 "SELECT COUNT(*) FROM sejours WHERE dossier_id=?",
                 (d["id"],)
             ).fetchone()[0]
-            
-            # Get most recent sejour
+
             dernier_sejour_row = conn.execute(
                 """SELECT id, date_entree, diagnostic_entree, etat FROM sejours
                    WHERE dossier_id=? ORDER BY date_entree DESC LIMIT 1""",
                 (d["id"],)
             ).fetchone()
-            
-            dernier_sejour = None
-            if dernier_sejour_row:
-                dernier_sejour = dict(dernier_sejour_row)
-            
-            # Check if currently admitted
+
+            dernier_sejour = dict(dernier_sejour_row) if dernier_sejour_row else None
+
+            # FIX 1: etat is 'sorti' not 'discharged' — check for 'admis' is correct
             is_currently_admitted = bool(
                 conn.execute(
                     "SELECT id FROM sejours WHERE dossier_id=? AND etat='admis'",
                     (d["id"],)
                 ).fetchone()
             )
-            
+
             results.append({
                 **d,
                 "sejours_count": sejours_count,
                 "dernier_sejour": dernier_sejour,
                 "is_currently_admitted": is_currently_admitted,
             })
-        
+
         return results
+    finally:
+        conn.close()
+
+
+@router.get("/api/dossiers")
+def list_dossiers(etat: Optional[str] = None):
+    """
+    List all dossiers (permanent patient files).
+    Optional filter: etat='admis' for current patients, etat='sorti' for archive.
+    """
+    conn = get_db()
+    try:
+        dossier_rows = conn.execute(
+            "SELECT * FROM dossiers ORDER BY createdat DESC"
+        ).fetchall()
+        results = []
+
+        for row in dossier_rows:
+            d = dict(row)
+
+            sejours_rows = conn.execute(
+                """SELECT id, date_entree, date_sortie, diagnostic_entree,
+                          diagnostic_sortie, etat, type_sortie, roomid, bed
+                   FROM sejours WHERE dossier_id=? ORDER BY date_entree DESC""",
+                (d["id"],)
+            ).fetchall()
+            sejours = [dict(s) for s in sejours_rows]
+
+            is_currently_admitted = any(s["etat"] == "admis" for s in sejours)
+
+            # Filter by etat if requested
+            if etat == "admis" and not is_currently_admitted:
+                continue
+            if etat == "sorti" and is_currently_admitted:
+                continue
+
+            d["sejours"] = sejours
+            d["sejours_count"] = len(sejours)
+            d["is_currently_admitted"] = is_currently_admitted
+            results.append(d)
+
+        return results
+    finally:
+        conn.close()
+
+
+@router.get("/api/dossiers/{dossier_id}")
+def get_dossier(dossier_id: int):
+    """Get a single dossier with all its sejours and discharge summaries"""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM dossiers WHERE id=?", (dossier_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Dossier introuvable")
+
+        d = dict(row)
+
+        sejours_rows = conn.execute(
+            """SELECT * FROM sejours WHERE dossier_id=? ORDER BY date_entree DESC""",
+            (dossier_id,)
+        ).fetchall()
+
+        sejours = []
+        for s in sejours_rows:
+            sr = dict(s)
+            crs_row = conn.execute(
+                "SELECT * FROM comptes_rendus_sortie WHERE sejour_id=? LIMIT 1",
+                (sr["id"],)
+            ).fetchone()
+            sr["compte_rendu_sortie"] = dict(crs_row) if crs_row else None
+            sejours.append(sr)
+
+        d["sejours"] = sejours
+        d["sejours_count"] = len(sejours)
+        d["is_currently_admitted"] = any(s["etat"] == "admis" for s in sejours)
+        return d
     finally:
         conn.close()
 
@@ -95,7 +167,7 @@ def create_dossier(data: DossierCreate):
     try:
         allergies_json = json.dumps(data.allergies_permanentes or []) if data.allergies_permanentes else "[]"
         vaccinations_json = json.dumps(data.vaccinations or []) if data.vaccinations else "[]"
-        
+
         c = conn.execute(
             """INSERT INTO dossiers(
                 nom, prenom, date_naissance, sexe,
@@ -125,7 +197,7 @@ def create_dossier(data: DossierCreate):
             ),
         )
         conn.commit()
-        
+
         new_id = c.lastrowid
         write_audit(
             conn,
@@ -136,7 +208,7 @@ def create_dossier(data: DossierCreate):
             target_id=new_id,
             detail={"nom": data.nom, "prenom": data.prenom}
         )
-        
+
         row = conn.execute("SELECT * FROM dossiers WHERE id=?", (new_id,)).fetchone()
         return dict(row) if row else {"id": new_id}
     finally:
@@ -152,24 +224,21 @@ def create_sejour(dossier_id: int, data: SejourCreate):
     """Open a new hospitalization for an existing dossier"""
     conn = get_db()
     try:
-        # Verify dossier exists
         dossier_row = conn.execute("SELECT * FROM dossiers WHERE id=?", (dossier_id,)).fetchone()
         if not dossier_row:
             raise HTTPException(404, "Dossier patient introuvable")
-        
-        # Verify room exists and bed is available
+
         room_row = conn.execute("SELECT * FROM rooms WHERE id=?", (data.roomid,)).fetchone()
         if not room_row:
             raise HTTPException(404, f"Salle {data.roomid} introuvable")
-        
+
         occupied = conn.execute(
             "SELECT id FROM patients WHERE room_id=? AND bed=? AND is_archived=0",
             (data.roomid, data.bed)
         ).fetchone()
         if occupied:
             raise HTTPException(409, f"Lit {data.bed} de la salle {data.roomid} déjà occupé")
-        
-        # Create sejour record
+
         c = conn.execute(
             """INSERT INTO sejours(
                 dossier_id, date_entree, diagnostic_entree,
@@ -194,10 +263,9 @@ def create_sejour(dossier_id: int, data: SejourCreate):
             ),
         )
         conn.commit()
-        
+
         new_sejour_id = c.lastrowid
-        
-        # Log admission
+
         write_audit(
             conn,
             actor=data.created_by,
@@ -212,13 +280,12 @@ def create_sejour(dossier_id: int, data: SejourCreate):
                 "bed": data.bed
             }
         )
-        
-        # Return merged dossier + sejour data
+
         sejour_row = conn.execute("SELECT * FROM sejours WHERE id=?", (new_sejour_id,)).fetchone()
         result = dict(dossier_row) if dossier_row else {}
         result.update(dict(sejour_row) if sejour_row else {})
         result["sejour_id"] = new_sejour_id
-        
+
         return result
     finally:
         conn.close()
@@ -232,17 +299,17 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
         patient_row = conn.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
         if not patient_row:
             raise HTTPException(404, "Patient introuvable")
-        
+
         patient = dict(patient_row)
-        
-        # Update patient record
+
         conn.execute(
             """UPDATE patients SET etat=?, date_sortie=?, type_sortie=?,
                resume_clinique=?, traitement_sortie=?, consignes_parents=?,
                medecin_sortie=?, is_archived=1, room_id=NULL, bed=NULL
                WHERE id=?""",
             (
-                data.type_sortie,
+                # FIX 2: use 'sorti' consistently, not data.type_sortie for the etat column
+                "sorti",
                 dtdate.today().isoformat(),
                 data.type_sortie,
                 data.resume_clinique,
@@ -252,20 +319,16 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
                 patient_id,
             ),
         )
-        
-        # Stop all active prescriptions
+
         conn.execute(
-            """UPDATE prescriptions SET end_date=? 
+            """UPDATE prescriptions SET end_date=?
                WHERE patient_id=? AND end_date IS NULL""",
             (dtdate.today().isoformat(), patient_id,)
         )
-        
-        # Create compte-rendu de sortie (only if sejour_id exists)
-        # If patient was created directly (not through SEJOUR), create minimal dossier and sejour
+
         sejour_id = patient.get("sejour_id")
         dossier_id = patient.get("dossier_id")
-        
-        # If no dossier_id, create one first
+
         if not dossier_id:
             d = conn.execute(
                 """INSERT INTO dossiers(
@@ -281,8 +344,11 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
                 ),
             )
             dossier_id = d.lastrowid
-        
-        # If no sejour_id, create one (patient admission without formal sejour)
+            conn.execute(
+                "UPDATE patients SET dossier_id=? WHERE id=?",
+                (dossier_id, patient_id)
+            )
+
         if not sejour_id:
             c = conn.execute(
                 """INSERT INTO sejours(
@@ -291,16 +357,39 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
                 ) VALUES (?,?,?,?,?,?,?)""",
                 (
                     dossier_id,
-                    patient.get("date_naissance", dtdate.today().isoformat()),
+                    patient.get("date_entree") or dtdate.today().isoformat(),
                     patient.get("diagnostic", "Non spécifié"),
                     patient.get("room_id"),
                     patient.get("bed"),
-                    "discharged",
+                    # FIX 2: use 'sorti' consistently
+                    "sorti",
                     data.medecin_sortie,
                 ),
             )
             sejour_id = c.lastrowid
-        
+            conn.execute(
+                "UPDATE patients SET sejour_id=? WHERE id=?",
+                (sejour_id, patient_id)
+            )
+        else:
+            # Update existing sejour to mark as discharged
+            conn.execute(
+                """UPDATE sejours SET etat='sorti', date_sortie=?,
+                   diagnostic_sortie=?, type_sortie=?, resume_clinique=?,
+                   traitement_sortie=?, consignes_parents=?, medecin_sortie=?
+                   WHERE id=?""",
+                (
+                    dtdate.today().isoformat(),
+                    data.diagnostic_sortie,
+                    data.type_sortie,
+                    data.resume_clinique,
+                    data.traitement_sortie,
+                    data.consignes_parents,
+                    data.medecin_sortie,
+                    sejour_id,
+                )
+            )
+
         crs_cursor = conn.execute(
             """INSERT INTO comptes_rendus_sortie(
                 sejour_id, dossier_id, date_redaction,
@@ -324,10 +413,9 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
             ),
         )
         crs_id = crs_cursor.lastrowid
-        
+
         conn.commit()
-        
-        # Log discharge
+
         write_audit(
             conn,
             actor=data.medecin_sortie,
@@ -337,11 +425,13 @@ def discharge_patient(patient_id: int, data: DischargeRequest):
             target_id=patient_id,
             detail={
                 "type_sortie": data.type_sortie,
-                "diagnostic": data.diagnostic_sortie
+                "diagnostic": data.diagnostic_sortie,
+                "dossier_id": dossier_id,
+                "sejour_id": sejour_id,
             }
         )
-        
-        return {"success": True, "crs_id": crs_id}
+
+        return {"success": True, "crs_id": crs_id, "dossier_id": dossier_id, "sejour_id": sejour_id}
     finally:
         conn.close()
 
@@ -354,38 +444,38 @@ def get_patient_history(patient_id: int):
         patient_row = conn.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
         if not patient_row:
             raise HTTPException(404, "Patient introuvable")
-        
+
         patient = dict(patient_row)
-        
-        # Get sejours (hospitalizations)
-        sejours_rows = conn.execute(
-            """SELECT id, date_entree, date_sortie, diagnostic_entree,
-                      diagnostic_sortie, poids_admission, etat, type_sortie,
-                      roomid, bed FROM sejours WHERE patient_id=? OR dossier_id=?
-               ORDER BY date_entree DESC""",
-            (patient_id, patient.get("dossier_id")),
-        ).fetchall()
-        
+        dossier_id = patient.get("dossier_id")
+
+        # FIX 3: sejours has no patient_id column — query only by dossier_id
+        sejours_rows = []
+        if dossier_id:
+            sejours_rows = conn.execute(
+                """SELECT id, date_entree, date_sortie, diagnostic_entree,
+                          diagnostic_sortie, poids_admission, etat, type_sortie,
+                          roomid, bed FROM sejours WHERE dossier_id=?
+                   ORDER BY date_entree DESC""",
+                (dossier_id,),
+            ).fetchall()
+
         sejours = []
         for s in sejours_rows:
             sr = dict(s)
-            # Get prescription count for this stay
             px_count = conn.execute(
                 "SELECT COUNT(*) FROM prescriptions WHERE patient_id=?",
                 (patient_id,)
             ).fetchone()[0]
             sr["prescriptions_count"] = px_count
             sejours.append(sr)
-        
-        # Get all prescriptions
+
         prescriptions = rows_to_list(
             conn.execute(
                 "SELECT * FROM prescriptions WHERE patient_id=?",
                 (patient_id,)
             ).fetchall()
         )
-        
-        # Get audit entries
+
         audit_entries = rows_to_list(
             conn.execute(
                 """SELECT * FROM audit_log WHERE target_type='patient'
@@ -393,9 +483,10 @@ def get_patient_history(patient_id: int):
                 (patient_id,)
             ).fetchall()
         )
-        
+
         return {
             "patient": patient,
+            "dossier_id": dossier_id,
             "sejours": sejours,
             "prescriptions": prescriptions,
             "audit_entries": audit_entries,
@@ -403,39 +494,5 @@ def get_patient_history(patient_id: int):
     finally:
         conn.close()
 
-
-@router.delete("/api/patients/{patient_id}")
-def delete_patient_restricted(patient_id: int, data: DeletePatientRequest):
-    """Delete a patient (restricted to Chef role, audit logged)"""
-    conn = get_db()
-    try:
-        patient_row = conn.execute("SELECT * FROM patients WHERE id=?", (patient_id,)).fetchone()
-        if not patient_row:
-            raise HTTPException(404, "Patient introuvable")
-        
-        # Check for prescriptions or dispense history
-        px_count = conn.execute("SELECT COUNT(*) FROM prescriptions WHERE patient_id=?", (patient_id,)).fetchone()[0]
-        dispense_count = conn.execute("SELECT COUNT(*) FROM dispense_log WHERE patient_id=?", (patient_id,)).fetchone()[0]
-        
-        if px_count > 0 or dispense_count > 0:
-            raise HTTPException(
-                403,
-                "Impossible de supprimer un dossier avec des données cliniques. Utilisez la procédure de sortie."
-            )
-        
-        conn.execute("DELETE FROM patients WHERE id=?", (patient_id,))
-        conn.commit()
-        
-        write_audit(
-            conn,
-            actor=data.actor,
-            actor_role="Médecin Chef Pédiatrie",
-            action="PATIENT_DELETED",
-            target_type="patient",
-            target_id=patient_id,
-            detail={"reason": data.reason}
-        )
-        
-        return {"success": True}
-    finally:
-        conn.close()
+# NOTE: DELETE /api/patients/{patient_id} is intentionally defined only in patients.py
+# It was removed from here to eliminate the duplicate route conflict.
